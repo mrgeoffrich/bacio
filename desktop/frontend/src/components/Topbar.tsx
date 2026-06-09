@@ -7,8 +7,12 @@ import NotificationBell from './NotificationBell';
 import ShippedPopover from './ShippedPopover';
 import { WEB_MODE } from '../env';
 import { viewPath, viewFromPath } from '../lib/routes';
-import type { Board, LeaderStatusDTO, AddRepositoryPayload } from '../api';
-import type { ShippedScope } from './shippedScope.ts';
+import { useActiveRepo } from '../state/RepoProvider';
+import { useAgents } from '../state/AgentsProvider';
+import { useCards } from '../state/CardsProvider';
+import { usePreferences } from '../state/PreferencesProvider';
+import { useLeaderStatus } from '../state/useLeaderStatus';
+import { useNotifications } from '../state/useNotifications';
 
 // NAV is the ordered top-nav. Exported so App can map the digit
 // hotkeys onto the same views in the same order. As of BACI-50 the
@@ -34,32 +38,34 @@ function formatSyncTime(iso: string) {
   return d.toLocaleString();
 }
 
-type AgentCounts = { available: number; busy: number };
-
+// BACI-361: the topbar reads its live data from the state hooks rather than
+// the ~18 props App used to drill in. Only the three shell-owned overlay
+// controls (close-settings-before-navigate, open-settings, open-sync) stay
+// props — the Shell owns those flags.
 type TopbarProps = {
-  boards: Board[];
-  activeBoard: string;
-  onPickBoard: (prefix: string) => void;
-  onAddRepository: (payload?: AddRepositoryPayload) => Promise<Board | undefined>;
   onBeforeNavigate?: () => void;
   onOpenSettings: () => void;
   onOpenSync: () => void;
-  leaderState: LeaderStatusDTO;
-  agentCounts: AgentCounts;
-  notifUnreadCount: number;
-  onNotifCountChange: (count: number) => void;
-  onOpenNotificationIssue: (prefix: string, key: string) => void;
-  shippedCount: number | null;
-  shippedScope: ShippedScope;
-  onShippedScopeChange: (next: ShippedScope) => void;
-  timezone: string;
-  flyingShipKey: string | null;
-  shipFlashing: boolean;
-  onShipFlightDone: () => void;
-  onOpenIssue: (key: string) => void;
 };
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenSettings, onOpenSync, leaderState, agentCounts, notifUnreadCount, onNotifCountChange, onOpenNotificationIssue, shippedCount, shippedScope, onShippedScopeChange, timezone, flyingShipKey, shipFlashing, onShipFlightDone, onOpenIssue }: TopbarProps) {
+export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }: TopbarProps) {
+  const { boards, activeBoard, openIssue: onOpenIssue } = useActiveRepo();
+  const { agentCounts } = useAgents();
+  const {
+    shippedCount,
+    shippedScope,
+    setShippedScope: onShippedScopeChange,
+    flyingShipKey,
+    shipFlashing,
+    onShipFlightDone,
+  } = useCards();
+  const { timezone } = usePreferences();
+  const leaderState = useLeaderStatus();
+  const {
+    notifUnreadCount,
+    setNotifUnreadCount: onNotifCountChange,
+    openNotificationIssue: onOpenNotificationIssue,
+  } = useNotifications();
   // BACI-203: the active view is derived from the URL, not a prop.
   // useLocation re-renders on every navigation so the segmented
   // button's `is-active` class stays in lockstep. The breadcrumb
@@ -227,12 +233,7 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
             </button>
           </Tooltip>
         )}
-        <RepoPicker
-          boards={boards}
-          activeBoard={activeBoard}
-          onPick={onPickBoard}
-          onAddRepository={onAddRepository}
-        />
+        <RepoPicker />
         <button className="mk-icbtn" aria-label="Settings" onClick={onOpenSettings}><Icon name="settings" /></button>
       </div>
     </header>

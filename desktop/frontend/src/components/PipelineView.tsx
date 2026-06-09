@@ -19,6 +19,8 @@ import type {
   BoardCardJob,
   BoardCardQuestion,
 } from '../api';
+import { useActiveRepo } from '../state/RepoProvider';
+import { useCards } from '../state/CardsProvider';
 
 // blockKind classifies a card while a drag-to-block gesture is in flight:
 // 'target' (a valid drop), 'source' (self-drop no-op), 'dup' (already
@@ -226,66 +228,44 @@ function blockDropProps(blockKind: BlockKind | undefined, onBlockDrop?: () => vo
   };
 }
 
+// BACI-361: PipelineView reads its cards + the ~20 mutation handlers from
+// useCards(), and its active repo + the open/edit nav helpers from
+// useActiveRepo(). Only the shell-owned "open composer" overlay control stays
+// a prop. The body (decomposed in Phase 4a) is otherwise unchanged.
 type PipelineViewProps = {
-  cards?: BoardCard[] | null;
-  activeBoard?: string;
-  // promptConfig is passed by the App route but not consumed here — kept
-  // in the prop type so the call site stays well-typed.
-  promptConfig?: unknown;
   onOpenComposer?: () => void;
-  onOpenCard?: (card: BoardCard) => void;
-  onOpenIssue?: (key: string) => void;
-  onMoveCard?: (key: string, col: string) => void;
-  onFastTrack?: (key: string) => void;
-  onCancelCard?: (key: string) => void;
-  onDoneCard?: (key: string) => void;
-  onReorder?: (key: string, position: number) => void;
-  onSetProcess?: (key: string, selection: ProcessSelection) => void;
-  onSetProcessAuto?: (key: string, selection: ProcessSelection) => void;
-  onResetProcess?: (key: string) => void;
-  onEditProcess?: (key: string) => void;
-  onStartJob?: (key: string) => void;
-  onStopJob?: (key: string) => void;
-  onRerunJob?: (key: string, seq: number) => void;
-  onSetEngineMode?: (key: string, mode: string) => void;
-  onShip?: (key: string) => void;
-  onMarkDone?: (key: string) => void;
-  onSetAutoShip?: (next: boolean) => void | Promise<unknown>;
-  onSetBacklogCollapsed?: (next: boolean) => void | Promise<unknown>;
-  onSetImpactPrimary?: (next: boolean) => void | Promise<unknown>;
-  onShipDispatch?: (key: string, mode: string) => void;
-  onCancelWaiting?: (key: string) => void;
-  onBlockCard?: (sourceKey: string, targetKey: string) => void;
 };
 
-export default function PipelineView({
-  cards,
-  activeBoard,
-  onOpenComposer,
-  onOpenCard,
-  onOpenIssue,
-  onMoveCard,
-  onFastTrack,
-  onCancelCard,
-  onDoneCard,
-  onReorder,
-  onSetProcess,
-  onSetProcessAuto,
-  onResetProcess,
-  onEditProcess,
-  onStartJob,
-  onStopJob,
-  onRerunJob,
-  onSetEngineMode,
-  onShip,
-  onMarkDone,
-  onSetAutoShip,
-  onSetBacklogCollapsed,
-  onSetImpactPrimary,
-  onShipDispatch,
-  onCancelWaiting,
-  onBlockCard,
-}: PipelineViewProps) {
+export default function PipelineView({ onOpenComposer }: PipelineViewProps) {
+  const {
+    activeBoard,
+    openCard: onOpenCard,
+    openIssue: onOpenIssue,
+    openProcessEditor: onEditProcess,
+  } = useActiveRepo();
+  const {
+    cards,
+    moveCard: onMoveCard,
+    fastTrackCard: onFastTrack,
+    cancelCardFromPipeline: onCancelCard,
+    doneCardFromPipeline: onDoneCard,
+    reorderPipelineCard: onReorder,
+    setCardProcess: onSetProcess,
+    setCardProcessAuto: onSetProcessAuto,
+    resetCardProcess: onResetProcess,
+    startCardJob: onStartJob,
+    stopCardJob: onStopJob,
+    rerunCardJob: onRerunJob,
+    setCardEngineMode: onSetEngineMode,
+    shipCardFromPipeline: onShip,
+    markDoneCardFromPipeline: onMarkDone,
+    setRepoAutoShip: onSetAutoShip,
+    setBacklogCollapsed: onSetBacklogCollapsed,
+    setImpactPrimary: onSetImpactPrimary,
+    dispatchFromCard: onShipDispatch,
+    cancelWaitingFromCard: onCancelWaiting,
+    onBlockCard,
+  } = useCards();
   const [activeQuestionId, setActiveQuestionId] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
   // collapsed (BACI-288) shrinks the Backlog column to a thin rail so the

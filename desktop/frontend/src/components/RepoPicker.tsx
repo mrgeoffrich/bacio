@@ -1,19 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import type { Board, AddRepositoryPayload } from '../api';
+import type { Board } from '../api';
 import Modal from './Modal';
 import Icon from './Icon';
 import { WEB_MODE } from '../env';
+import { useActiveRepo } from '../state/RepoProvider';
 
 // Web-only Add-Repository modal state: the path/name/prefix the user is
 // typing. Null when the modal is closed.
 type AddWebState = { path: string; name: string; prefix: string };
-
-type RepoPickerProps = {
-  boards: Board[];
-  activeBoard: string;
-  onPick: (prefix: string) => void;
-  onAddRepository: (payload?: AddRepositoryPayload) => Promise<Board | undefined>;
-};
 
 // RepoPicker is the topbar's repository selector — a searchable dropdown that
 // replaces the plain native <select>. Clicking the trigger opens a menu with
@@ -23,7 +17,11 @@ type RepoPickerProps = {
 // path-input modal that POSTs the typed path to /repos (BACI-50). The
 // onAddRepository callback handles both: desktop ignores its payload,
 // web reads {path, name, prefix?} off it.
-export default function RepoPicker({ boards, activeBoard, onPick, onAddRepository }: RepoPickerProps) {
+//
+// BACI-361: reads the board list + active repo + pick/add helpers from
+// useActiveRepo() rather than props.
+export default function RepoPicker() {
+  const { boards, activeBoard, pickBoard: onPick, addRepository: onAddRepository } = useActiveRepo();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   // Web-only: { path, name, prefix } modal state. Null = closed.

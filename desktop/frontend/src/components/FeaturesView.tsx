@@ -18,6 +18,8 @@ import FeatureEmojiPicker from './FeatureEmojiPicker';
 import Icon from './Icon';
 import { documentPath, featurePath, issuePath } from '../lib/routes';
 import { isValidBranchName, shortBranchLabel } from '../lib/branchName';
+import { useActiveRepo } from '../state/RepoProvider';
+import { useCards } from '../state/CardsProvider';
 
 // BACI-236: the dependency-graph view is lazy-loaded so the
 // @xyflow/react chunk (~150 KB gzipped) only lands when the user
@@ -165,16 +167,14 @@ function mockFeatures(): FeatureSummary[] {
 // every kanban card belonging to the feature when flipped off.
 // Everything else still flows through the CLI.
 //
-// onChangeHidden (BACI-177) is fired by the toggle so the parent
-// (App.tsx) can refresh the cached board cards — flipping the toggle
-// changes which cards ship over the wire, and the App-owned `cards`
-// state would otherwise show stale entries until the 10s poll.
-type FeaturesViewProps = {
-  activeBoard: string;
-  onChangeHidden: () => void;
-};
-
-export default function FeaturesView({ activeBoard, onChangeHidden }: FeaturesViewProps) {
+// BACI-361: the active repo comes from useActiveRepo() and the board-cards
+// refresh from useCards() — the route element takes no props. Flipping the
+// per-feature "Show on board" toggle (BACI-177) fires refreshCards so the
+// cached board cards reflect the change without waiting for the 10s poll
+// (the toggle changes which cards ship over the wire).
+export default function FeaturesView() {
+  const { activeBoard } = useActiveRepo();
+  const { refreshCards: onChangeHidden } = useCards();
   // BACI-203: the selected slug is mirrored to/from the URL via
   // useParams + navigate. Click handlers in the master pane call
   // navigate(featurePath(slug)); the URL is the source of truth so

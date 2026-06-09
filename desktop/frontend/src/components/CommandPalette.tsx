@@ -1,15 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
 import type { BoardCard } from '../api';
 import Icon from './Icon';
+import { useCards } from '../state/CardsProvider';
 
 type CommandPaletteProps = {
   open: boolean;
-  cards: BoardCard[];
   onClose: () => void;
   onPick: (card: BoardCard) => void;
 };
 
-export default function CommandPalette({ open, cards, onClose, onPick }: CommandPaletteProps) {
+// BACI-361: cards are read from useCards() rather than prop-drilled. The
+// overlay flags (open) + the shell-owned pick/close handlers stay props.
+export default function CommandPalette({ open, onClose, onPick }: CommandPaletteProps) {
+  const { cards } = useCards();
   const [q, setQ] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 

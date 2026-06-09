@@ -1,28 +1,24 @@
-import type { Board } from '../api';
+import { useActiveRepo } from '../state/RepoProvider';
 
 // RepoNotFound (BACI-285) is the hard-404 screen for a URL whose first
 // segment isn't a known repo prefix — e.g. a stale `/ui/ZZZZ/pipeline`
-// link to a repo that was never added or has since been removed. App
-// renders this in place of the page routes when the prefix doesn't
-// match any board (and isn't a recognised prefix-less legacy page word,
-// which soft-redirects instead). The user picks a real repo from the
-// list to jump back into the app; `onPickBoard` is App's URL-rewriting
-// repo switch, so the choice routes to that repo's Pipeline.
+// link to a repo that was never added or has since been removed. Shell
+// renders this in place of the page routes when the prefix doesn't match
+// any board (and isn't a recognised prefix-less legacy page word, which
+// soft-redirects instead). The user picks a real repo from the list to
+// jump back into the app; `pickBoard` is the URL-rewriting repo switch, so
+// the choice routes to that repo's Pipeline.
 //
-// Reuses the existing empty-state styling (`mk-app-state` /
-// `mk-features-empty` idiom) so no new CSS is needed.
-type RepoNotFoundProps = {
-  prefix: string;
-  boards: Board[];
-  onPickBoard: (prefix: string) => void;
-};
-
-export default function RepoNotFound({ prefix, boards, onPickBoard }: RepoNotFoundProps) {
+// BACI-361: reads the unknown prefix + board list + repo switch from
+// useActiveRepo() rather than props. Reuses the existing empty-state
+// styling (`mk-app-state` / `mk-features-empty` idiom) so no new CSS.
+export default function RepoNotFound() {
+  const { urlPrefix, boards, pickBoard } = useActiveRepo();
   return (
     <div className="mk-app-state">
       <div className="mk-features-empty" style={{ flexDirection: 'column', gap: '12px' }}>
         <div>
-          <strong>Repository {prefix} not found.</strong>
+          <strong>Repository {urlPrefix} not found.</strong>
         </div>
         <div>
           No repository with that prefix is registered. Pick one below or
@@ -34,7 +30,7 @@ export default function RepoNotFound({ prefix, boards, onPickBoard }: RepoNotFou
               <button
                 key={b.prefix}
                 className="mk-repo-picker-item"
-                onClick={() => onPickBoard(b.prefix)}
+                onClick={() => pickBoard(b.prefix)}
                 role="option"
               >
                 <span className="mk-repo-picker-item-name">{b.name}</span>
