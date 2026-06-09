@@ -10,6 +10,32 @@ The React frontend is **strongly typed** (BACI-346). `tsconfig.json` runs `stric
 `noImplicitAny` + `noUnusedParameters` + `noUnusedLocals`. The build gates on it:
 `npm run build` and `npm run build:web` both run `tsc` first. Keep it green.
 
+## Data flow & module layout (read `docs/frontend-architecture.md` first)
+
+Post-BACI-350 the tree has a deliberate grain: `components/` (thin views) →
+`state/` (Context providers + co-located mutations) → `api/` (one DTO contract,
+two transports) → `lib/hooks/` (cross-cutting primitives). Land changes on it:
+
+- **Don't hand-roll a fetch.** The `useState + useEffect(fetch) + .catch(reportError)`
+  triad is replaced by `useAsyncResource` / `usePolledResource` (`lib/hooks/`).
+  They own the loading/error state, the stale-load guard, and the
+  `silent`-vs-`reportError` decision (pick the option that preserves today's
+  behaviour). Optimistic writes go through `useOptimisticToggle` /
+  `useOptimisticMutation`, persisted UI state through `useLocalStorage`.
+- **Global state lives in `state/` providers** (`RepoProvider`, `CardsProvider`,
+  `AgentsProvider`, `PreferencesProvider`), read via their `use*` hooks — not
+  prop-drilled from `App`, which is now a thin shell.
+- **DTOs live once in `api/contract.ts`** (no runtime imports); both transports
+  `satisfies` it so drift is a `tsc` error. Wire types + reshapers live in
+  `api/wire/*`; `api.ts` / `api.http.ts` are per-domain barrels.
+- **`reportError` headlines** follow `"Couldn't <verb> <object>"`, double-quoted.
+- **`React.memo`'d hot list items need stable callbacks** (latest-ref pattern,
+  not a growing dep array — `react-hooks/exhaustive-deps` is an error) or the
+  memo silently stops helping. See `components/pipeline/memoCard.ts`.
+
+The full narrative — the four layers, the provider nesting, the hook table — is
+in [`docs/frontend-architecture.md`](../../docs/frontend-architecture.md).
+
 ## Hard rules
 
 - **No `any`.** No `as any`, no `@ts-ignore` / `@ts-expect-error` / `@ts-nocheck`. If a

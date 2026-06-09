@@ -1317,7 +1317,8 @@ body { margin: 0; }
   background: transparent; border: 0; cursor: pointer;
   width: 100%; text-align: left;
 }
-.mk-palette-item:hover { background: var(--bg-4); }
+.mk-palette-item:hover,
+.mk-palette-item.is-active { background: var(--bg-4); }
 .mk-palette-id { color: var(--fg-3); flex-shrink: 0; }
 .mk-palette-title { font-size: 13px; color: var(--fg-1); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mk-palette-empty { padding: 16px; font-size: 13px; color: var(--fg-4); text-align: center; }

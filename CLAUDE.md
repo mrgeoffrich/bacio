@@ -26,6 +26,7 @@ Read the relevant doc **before** you start planning a change — these shape the
 | `<worktree_root>/docs/markdown-rendering.md` | Touching markdown rendering on any surface. Rule: every React read surface goes through `<MarkdownView>` (never `react-markdown` directly); TUI goes through `renderMarkdown`. |
 | `<worktree_root>/docs/motion-layout-animations.md` | Touching card-movement animations on the React surfaces — the Pipeline cards or the ship flourish (Motion, pinned at v11.18.2). |
 | `<worktree_root>/docs/worktree-environments.md` | Touching `<worktree_root>/internal/wtenv/` or anything that resolves a DB / port / log dir. |
+| `<worktree_root>/docs/frontend-architecture.md` | Any non-trivial change to `<worktree_root>/desktop/frontend/src` — the `lib/hooks/` data primitives, the `api/contract.ts` DTO seam, the `state/` Context providers, and the decomposed `components/<domain>/` views. |
 | `<worktree_root>/docs/web-app-mode.md` | Changing the seam between Wails and HTTP transports (`<worktree_root>/desktop/frontend/src/api.ts` and friends). |
 | `<worktree_root>/.claude/rules/frontend-typescript.md` (path-scoped — also auto-loads when editing `desktop/frontend/**`) | Writing or changing any React frontend TS/TSX — strict-typing rules, the `api` seam, the cross-transport enum footgun. |
 | `<worktree_root>/docs/reverse-proxy.md` | Touching `<worktree_root>/internal/proxy/` or the `/anthropic/*` reverse-proxy route, its auth-exemption, or the `agentmode.LaunchCommand` launch-env injection. |

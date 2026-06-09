@@ -142,7 +142,7 @@ export default function SyncSetupModal({ open, project, syncRepos, onClose, onDo
         const msg = (err instanceof Error && err.message) || 'Failed to set up sync';
         setError(msg);
         if (!isClientValidationError(msg)) {
-          reportError(err, { headline: "Sync setup failed" });
+          reportError(err, { headline: "Couldn't set up sync" });
         }
       }
     } finally {

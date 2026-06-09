@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import Tooltip from '../Tooltip';
 import CardHead from './CardHead';
 import CardTitleBlock from './CardTitleBlock';
@@ -9,6 +9,7 @@ import StageCardFooter from './StageCardFooter';
 import { useStageCardState } from './useStageCardState';
 import { blockDragClass, blockDropProps } from './blockDrag';
 import type { BlockKind } from './blockDrag';
+import { cardPropsEqual } from './memoCard';
 import type { BoardCard, ProcessSelection } from '../../api';
 
 // StageCard — the in-pipeline card that grows to fill the column. Issue
@@ -25,11 +26,15 @@ type StageCardProps = {
   blockKind?: BlockKind;
   onBlockDragStart?: (key: string) => void;
   onBlockDragEnd?: () => void;
-  onBlockDrop?: () => void;
-  onOpen?: () => void;
+  // onBlockDrop / onOpen / onDragStart take the card / key so the parent can
+  // pass a stable handler identity (the card binds its own data internally) —
+  // required for the React.memo below to skip the poll re-render. See
+  // memoCard.ts.
+  onBlockDrop?: (card: BoardCard) => void;
+  onOpen?: (card: BoardCard) => void;
   onOpenIssue?: (key: string) => void;
   onHighlight?: (key: string | null) => void;
-  onDragStart?: () => void;
+  onDragStart?: (key: string) => void;
   onDragEnd?: () => void;
   onSetProcess?: (key: string, selection: ProcessSelection) => void;
   onSetProcessAuto?: (key: string, selection: ProcessSelection) => void;
@@ -44,7 +49,7 @@ type StageCardProps = {
   onOpenQuestion?: (id: number) => void;
 };
 
-export default function StageCard({
+function StageCard({
   card,
   activeBoard,
   impactPrimary,
@@ -85,19 +90,21 @@ export default function StageCard({
   // be a drop *target* (it just becomes blocked-by another card, which is
   // purely informational and doesn't move it).
   const blockClass = blockDragClass(blockKind);
-  const blockProps = blockDropProps(blockKind, onBlockDrop);
+  // The card binds its own data to the stable parent handlers here, internally,
+  // so the props it receives stay referentially stable across the poll.
+  const blockProps = blockDropProps(blockKind, onBlockDrop ? () => onBlockDrop(card) : undefined);
 
   return (
     <Tooltip label={locked ? 'Stop the running job before moving this card' : undefined}>
     <article
       className={`mk-pl-stage${isDragging ? ' is-dragging' : ''}${paused ? ' is-attn' : ''}${isHighlighted ? ' is-blocker-hl' : ''}${locked ? ' is-locked' : ''}${blockClass}`}
       draggable={!locked}
-      onDragStart={locked ? undefined : onDragStart}
+      onDragStart={locked ? undefined : () => onDragStart?.(card.key)}
       onDragEnd={locked ? undefined : onDragEnd}
       onDragOver={blockKind ? blockProps.onDragOver : undefined}
       onDrop={blockKind ? blockProps.onDrop : undefined}
     >
-      <header className="mk-pl-stage-head" onClick={onOpen}>
+      <header className="mk-pl-stage-head" onClick={() => onOpen?.(card)}>
         <CardHead
           card={card}
           activeBoard={activeBoard}
@@ -144,3 +151,9 @@ export default function StageCard({
     </Tooltip>
   );
 }
+
+// React.memo'd (BACI-366): with the parent now passing stable callbacks, the
+// only churning prop is `card`, which cardPropsEqual compares by value — so the
+// 10s board poll re-renders only the stage cards whose data actually changed
+// instead of cascading through every card's body / footer / process menu.
+export default memo(StageCard, cardPropsEqual);

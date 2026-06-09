@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { AnimatePresence, m } from 'motion/react';
 import Icon from './Icon';
 import Tooltip from './Tooltip';
@@ -96,6 +96,17 @@ export default function PipelineView({ onOpenComposer }: PipelineViewProps) {
     blockTargetKind, dropOnCard, dropBlockOnCard,
     colDropProps, trashDropProps, doneDropProps,
   } = useDragDropLogic(cardByKey, { onMoveCard, onShip, onReorder, onCancelCard, onDoneCard, onBlockCard });
+
+  // Stable drag-end handler so the memo'd cards (BACI-366) keep a constant
+  // onDragEnd — the inline `() => { setDragKey(null); setDragOverCol(null); }`
+  // would churn every render and defeat the memo. dropOnCard / dropBlockOnCard
+  // are already stable (useDragDropLogic), and setDragKey / openCard / the
+  // useCards mutation handlers are stable, so the cards receive only stable
+  // callbacks + value props.
+  const handleDragEnd = useCallback(() => {
+    setDragKey(null);
+    setDragOverCol(null);
+  }, [setDragKey, setDragOverCol]);
 
   if (!activeBoard) {
     return (
@@ -206,13 +217,13 @@ export default function PipelineView({ onOpenComposer }: PipelineViewProps) {
                     blockKind={blockTargetKind(card)}
                     onBlockDragStart={onBlockDragStart}
                     onBlockDragEnd={onBlockDragEnd}
-                    onBlockDrop={() => dropBlockOnCard(card)}
-                    onOpen={() => onOpenCard?.(card)}
+                    onBlockDrop={dropBlockOnCard}
+                    onOpen={onOpenCard}
                     onOpenIssue={onOpenIssue}
                     onHighlight={onHighlight}
-                    onDragStart={() => setDragKey(card.key)}
-                    onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
-                    onDropCard={() => dropOnCard(card, i)}
+                    onDragStart={setDragKey}
+                    onDragEnd={handleDragEnd}
+                    onDropCard={dropOnCard}
                     onMoveCard={onMoveCard}
                     onFastTrack={onFastTrack}
                   />
@@ -258,12 +269,12 @@ export default function PipelineView({ onOpenComposer }: PipelineViewProps) {
                   blockKind={blockTargetKind(card)}
                   onBlockDragStart={onBlockDragStart}
                   onBlockDragEnd={onBlockDragEnd}
-                  onBlockDrop={() => dropBlockOnCard(card)}
-                  onOpen={() => onOpenCard?.(card)}
+                  onBlockDrop={dropBlockOnCard}
+                  onOpen={onOpenCard}
                   onOpenIssue={onOpenIssue}
                   onHighlight={onHighlight}
-                  onDragStart={() => setDragKey(card.key)}
-                  onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
+                  onDragStart={setDragKey}
+                  onDragEnd={handleDragEnd}
                   onSetProcess={onSetProcess}
                   onSetProcessAuto={onSetProcessAuto}
                   onResetProcess={onResetProcess}
@@ -274,7 +285,7 @@ export default function PipelineView({ onOpenComposer }: PipelineViewProps) {
                   onSetEngineMode={onSetEngineMode}
                   onShip={onShip}
                   onMarkDone={onMarkDone}
-                  onOpenQuestion={(id) => setActiveQuestionId(id)}
+                  onOpenQuestion={setActiveQuestionId}
                 />
               </m.div>
             ))}
@@ -328,12 +339,12 @@ export default function PipelineView({ onOpenComposer }: PipelineViewProps) {
                 impactPrimary={impactPrimary}
                 isDragging={dragKey === card.key}
                 isHighlighted={card.key === highlightKey}
-                onOpen={() => onOpenCard?.(card)}
+                onOpen={onOpenCard}
                 onOpenIssue={onOpenIssue}
                 onHighlight={onHighlight}
-                onDragStart={() => setDragKey(card.key)}
-                onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
-                onDropCard={() => dropOnCard(card, i)}
+                onDragStart={setDragKey}
+                onDragEnd={handleDragEnd}
+                onDropCard={dropOnCard}
                 onShipDispatch={onShipDispatch}
                 onCancelWaiting={onCancelWaiting}
               />
