@@ -88,6 +88,8 @@ Client-side routing via `react-router` v7, `<BrowserRouter>` on both surfaces (B
 
 Markdown rendering across both surfaces follows one rule: every read surface in the React tree goes through `<MarkdownView>` (`desktop/frontend/src/lib/markdownView.tsx`); never `react-markdown` directly. The TUI side uses `internal/tui/markdown.go`'s `renderMarkdown` (glamour). See [`docs/markdown-rendering.md`](docs/markdown-rendering.md).
 
+The tree's internal grain — the `lib/hooks/` data primitives, the `api/contract.ts` DTO seam, the `state/` Context providers that keep `App.tsx` a thin shell, and the decomposed `components/<domain>/` views — is documented in [`docs/frontend-architecture.md`](docs/frontend-architecture.md). Read it before any non-trivial frontend change.
+
 ## Claude Code integration
 
 bacio is designed to be driven by an agent — primarily Claude Code — through four host-integration surfaces, all set up by **one install verb**: `bacio install-agent`.
@@ -230,5 +232,6 @@ The docs in this table are **contributor-facing** — they describe how the code
 | File logging | [`docs/logging.md`](docs/logging.md) | When debugging a long-running process or adding a new structured log emitter. |
 | Background sync | [`docs/background-sync.md`](docs/background-sync.md) | Before touching `internal/sync/` or the sync UI. |
 | Profiling | [`docs/profiling.md`](docs/profiling.md) | When diagnosing a TUI freeze or memory issue. |
+| Frontend architecture (hooks / api seam / state providers / view decomposition) | [`docs/frontend-architecture.md`](docs/frontend-architecture.md) | Before any non-trivial change to `desktop/frontend/src`. |
 | Web app mode (browser-served React) | [`docs/web-app-mode.md`](docs/web-app-mode.md) | When changing the seam between Wails and HTTP transports. |
 | User-facing intro | [`docs/getting-started.md`](docs/getting-started.md) | When orienting a new bacio user (not for codebase work). |
