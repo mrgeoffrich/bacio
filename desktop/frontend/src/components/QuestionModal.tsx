@@ -68,7 +68,7 @@ export default function QuestionModal({ questionId, onClose }: QuestionModalProp
         setOtherText({});
       })
       .catch((err) =>
-        reportError(err, { headline: 'Could not load question' }),
+        reportError(err, { headline: "Couldn't load question" }),
       )
       .finally(() => setLoading(false));
   }, [questionId]);
@@ -152,7 +152,7 @@ export default function QuestionModal({ questionId, onClose }: QuestionModalProp
       await api.answerSessionQuestion(questionId, final);
       onClose?.();
     } catch (err) {
-      reportError(err, { headline: 'Could not submit answer' });
+      reportError(err, { headline: "Couldn't submit answer" });
     } finally {
       setLoading(false);
     }
@@ -168,7 +168,7 @@ export default function QuestionModal({ questionId, onClose }: QuestionModalProp
       await api.cancelSessionQuestion(questionId);
       onClose?.();
     } catch (err) {
-      reportError(err, { headline: 'Could not dismiss question' });
+      reportError(err, { headline: "Couldn't dismiss question" });
     } finally {
       setLoading(false);
     }
