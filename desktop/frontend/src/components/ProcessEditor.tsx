@@ -11,6 +11,8 @@ import {
 } from '../lib/pipelineProcesses';
 import { viewPath } from '../lib/routes';
 import type { BoardCard } from '../api';
+import { useCards } from '../state/CardsProvider';
+import { useActiveRepo } from '../state/RepoProvider';
 
 // A single persisted job in the card's process chain ({sequence, mode,
 // status}), derived from the BoardCard wire type so it stays in lockstep
@@ -24,13 +26,6 @@ type TailRow = { uid: string; mode: string };
 // The error banner surfaced on a failed Save.
 type Banner = { kind: string; text: string };
 
-type ProcessEditorProps = {
-  cards: BoardCard[];
-  activeBoard: string;
-  onSave: (key: string, stages: string[]) => Promise<void>;
-  onSaveAuto: (key: string, stages: string[]) => Promise<void>;
-};
-
 // ProcessEditor (BACI-294) — the full-screen Edit Process screen. It edits
 // an in_pipeline card's job chain as a re-orderable list, respecting work
 // already done: the completed / running / cancelled jobs are a LOCKED
@@ -42,12 +37,16 @@ type ProcessEditorProps = {
 // as the source of truth, so a stale client can never corrupt history.
 // Cancel discards and returns to the Pipeline.
 //
-// The screen reads the card's live chain off the cached `cards` array App
-// already threads into the Pipeline subtree (each card carries
-// `jobs: [{sequence, mode, status}]`). A deep-link before cards have
-// loaded renders a loading state, then redirects to the Pipeline if the
-// key isn't found.
-export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }: ProcessEditorProps) {
+// The screen reads the card's live chain off the cached `cards` array the
+// CardsProvider holds (each card carries `jobs: [{sequence, mode, status}]`).
+// A deep-link before cards have loaded renders a loading state, then
+// redirects to the Pipeline if the key isn't found.
+//
+// BACI-361: cards + the Save callbacks come from useCards(), the active repo
+// from useActiveRepo() — the route element takes no props.
+export default function ProcessEditor() {
+  const { cards, editCardProcessTail: onSave, editCardProcessTailAuto: onSaveAuto } = useCards();
+  const { activeBoard } = useActiveRepo();
   const { key } = useParams();
   const navigate = useNavigate();
   const card = useMemo(

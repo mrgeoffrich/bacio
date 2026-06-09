@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import Modal from './Modal';
 import * as api from '../api';
 import type { FeatureSummary, BoardCard } from '../api';
+import { useActiveRepo } from '../state/RepoProvider';
 
 // IssueComposer (BACI-166) — the "+ from prompt" modal launched from the
 // Topbar's `+` button. The user types a one-line idea (and optionally a
@@ -18,19 +19,21 @@ import type { FeatureSummary, BoardCard } from '../api';
 // Props:
 //   - open: boolean controlling Modal open state.
 //   - onClose(): close handler (X / Cancel / Escape).
-//   - repoPrefix: the active board prefix; required (the composer is
-//     hidden when "all" is active, but defend at the API boundary too).
-//   - onCreated(newCard): fires on a successful create — App.tsx
-//     prepends the optimistic card, opens IssueWorkspace, and bumps the
-//     refresh poll. The composer itself is unaware of the routing.
+//   - onCreated(newCard): fires on a successful create — Shell prepends the
+//     optimistic card, opens IssueWorkspace, and bumps the refresh poll. The
+//     composer itself is unaware of the routing.
+//
+// BACI-361: the active repo prefix is read from useActiveRepo() rather than
+// prop-drilled (the composer is hidden when "all" is active, but it still
+// defends at the API boundary).
 type IssueComposerProps = {
   open: boolean;
   onClose: () => void;
-  repoPrefix: string;
   onCreated: (newCard: BoardCard) => void;
 };
 
-export default function IssueComposer({ open, onClose, repoPrefix, onCreated }: IssueComposerProps) {
+export default function IssueComposer({ open, onClose, onCreated }: IssueComposerProps) {
+  const { activeBoard: repoPrefix } = useActiveRepo();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [inFlight, setInFlight] = useState(false);

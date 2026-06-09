@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Board, BoardColumn } from '../api';
 import Icon from './Icon';
 import SectionRail from './settings/SectionRail';
 import SystemSettingsSection from './settings/SystemSettingsSection';
 import SyncSettingsSection from './settings/SyncSettingsSection';
 import PerRepoSettingsSection from './settings/PerRepoSettingsSection';
+import { usePreferences } from '../state/PreferencesProvider';
+import { useActiveRepo } from '../state/RepoProvider';
 
 // SettingsView is the desktop / web Settings screen — a full-screen
 // view (not a modal) covering the content area below the topbar.
@@ -32,45 +33,30 @@ const SECTIONS: { id: SettingsSection; label: string; hint: string }[] = [
   { id: 'per-repo', label: 'Per-repository', hint: 'Per-repo defaults' },
 ];
 
+// BACI-361: the App-wide preferences + the active repo's board/columns come
+// from usePreferences() / useActiveRepo(); only the shell-owned overlay
+// controls (onClose, initialSection) stay props.
 type SettingsViewProps = {
-  theme: string;
-  onChangeTheme: (theme: string) => void;
-  showArchived: boolean;
-  onChangeShowArchived: (next: boolean) => void;
-  archiveAutoEnabled: boolean;
-  archiveRetentionDays: number;
-  onChangeArchivePreferences: (autoEnabled: boolean, retentionDays: number) => void;
-  audioEnabled: boolean;
-  onChangeAudioEnabled: (next: boolean) => void;
-  timezone: string;
-  onChangeTimezone: (next: string) => void;
-  columns: BoardColumn[];
   onClose: () => void;
-  onTemplatesChanged: () => void;
-  repoPrefix: string;
-  boards: Board[];
   initialSection: string | null;
 };
 
-export default function SettingsView({
-  theme,
-  onChangeTheme,
-  showArchived,
-  onChangeShowArchived,
-  archiveAutoEnabled,
-  archiveRetentionDays,
-  onChangeArchivePreferences,
-  audioEnabled,
-  onChangeAudioEnabled,
-  timezone,
-  onChangeTimezone,
-  columns,
-  onClose,
-  onTemplatesChanged,
-  repoPrefix,
-  boards,
-  initialSection,
-}: SettingsViewProps) {
+export default function SettingsView({ onClose, initialSection }: SettingsViewProps) {
+  const {
+    theme,
+    setTheme: onChangeTheme,
+    showArchived,
+    changeShowArchived: onChangeShowArchived,
+    archiveAutoEnabled,
+    archiveRetentionDays,
+    changeArchivePreferences: onChangeArchivePreferences,
+    audioEnabled,
+    changeAudioEnabled: onChangeAudioEnabled,
+    timezone,
+    changeTimezone: onChangeTimezone,
+    refreshPromptConfig: onTemplatesChanged,
+  } = usePreferences();
+  const { activeBoard: repoPrefix, boards, columns } = useActiveRepo();
   // Local-only selection state — opening Settings always lands on
   // System unless the topbar Sync pill routed in with `initialSection`.
   // The design doc explicitly recommends NOT persisting the last
