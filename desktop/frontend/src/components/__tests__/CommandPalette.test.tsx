@@ -67,4 +67,38 @@ describe('CommandPalette', () => {
     expect(onPick).toHaveBeenCalledWith(cards[0]);
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('exposes a listbox with the first option active (BACI-366 a11y)', () => {
+    render(<CommandPalette open onClose={vi.fn()} onPick={vi.fn()} />);
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    const options = screen.getAllByRole('option');
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveAttribute('aria-selected', 'true');
+    expect(options[1]).toHaveAttribute('aria-selected', 'false');
+    // The combobox points its activedescendant at the highlighted option.
+    expect(screen.getByRole('combobox')).toHaveAttribute('aria-activedescendant', options[0].id);
+  });
+
+  it('ArrowDown moves the active option and Enter picks it', () => {
+    const onPick = vi.fn();
+    const onClose = vi.fn();
+    render(<CommandPalette open onClose={onClose} onPick={onPick} />);
+    const input = screen.getByRole('combobox');
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    const options = screen.getAllByRole('option');
+    expect(options[1]).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onPick).toHaveBeenCalledWith(cards[1]);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('ArrowUp clamps at the top and Escape closes', () => {
+    const onClose = vi.fn();
+    render(<CommandPalette open onClose={onClose} onPick={vi.fn()} />);
+    const input = screen.getByRole('combobox');
+    fireEvent.keyDown(input, { key: 'ArrowUp' }); // already at the top — no move
+    expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
+  });
 });

@@ -181,9 +181,9 @@ export default function QuestionModal({ questionId, onClose }: QuestionModalProp
       title="Agent question"
       preventClickOutsideClose
     >
-      {loading && !row && <p className="mk-drawer-text">Loading…</p>}
+      {loading && !row && <p className="mk-drawer-text" role="status">Loading…</p>}
       {row && row.state !== ('open' as QuestionState) && (
-        <p className="mk-drawer-text mk-meta-empty">
+        <p className="mk-drawer-text mk-meta-empty" role="status">
           This question is no longer open (state: {row.state}). Refresh to
           remove it from your list.
         </p>

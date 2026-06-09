@@ -116,12 +116,20 @@ export default function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto
   const segConnActive = (i: number) => stages[SEG_ORDER[i]] && stages[SEG_ORDER[i + 1]];
 
   return (
-    <div className="mk-pl-procmenu">
-      <div className="mk-pl-procmenu-title">
+    // role="group" + aria-labelledby ties the overlay to its heading; the
+    // Escape-to-cancel keydown bubbles up from whichever control has focus, so
+    // a keyboard user can back out of an Edit-process overlay (BACI-366 a11y).
+    <div
+      className="mk-pl-procmenu"
+      role="group"
+      aria-labelledby="mk-procmenu-title"
+      onKeyDown={(e) => { if (e.key === 'Escape' && onCancel) onCancel(); }}
+    >
+      <div className="mk-pl-procmenu-title" id="mk-procmenu-title">
         {dimmedHasProcess ? 'Replace the process' : 'Pick a process'}
       </div>
 
-      <div className={`mk-pl-segbar${standalone ? ' is-dim' : ''}`}>
+      <div className={`mk-pl-segbar${standalone ? ' is-dim' : ''}`} role="group" aria-label="Process stages">
         {SEG_ORDER.map((mode, i) => {
           const on = stages[mode];
           return (
@@ -133,6 +141,7 @@ export default function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto
                 type="button"
                 className={`mk-pl-seg is-${mode}${on ? ' is-on' : ''}`}
                 disabled={!!standalone}
+                aria-pressed={on}
                 onClick={() => toggleStage(mode)}
                 title={on ? `${stageLabel(mode)} on — click to drop it` : `Add ${stageLabel(mode)}`}
               >
@@ -162,6 +171,7 @@ export default function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto
             key={slug}
             type="button"
             className={`mk-pl-largeplan${on ? ' is-selected' : ''}`}
+            aria-pressed={on}
             onClick={() => selectStandalone(slug)}
             title={`Run the standalone ${stageLabel(slug)} agent (can't be chained)`}
           >
