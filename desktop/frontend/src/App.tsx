@@ -44,6 +44,7 @@ import { useInterval, POLL_INTERVAL_MS } from './lib/hooks/useInterval';
 import { useAsyncResource } from './lib/hooks/useAsyncResource';
 import { usePolledResource } from './lib/hooks/usePolledResource';
 import { useLocalStorage, readLocalStorage, writeLocalStorage } from './lib/hooks/useLocalStorage';
+import { useOptimisticMutation } from './lib/hooks/useOptimisticMutation';
 import { useShipFlourish } from './lib/shipFlourish';
 import { useShipSfx } from './lib/shipSfx';
 import { decideOdometerAction } from './lib/odometer';
@@ -171,6 +172,9 @@ export default function App() {
   // stay canonical. "" until boards load or when the prefix is unknown.
   const matchedBoard = boards.find(b => b.prefix.toLowerCase() === urlPrefix.toLowerCase());
   const activeBoard = matchedBoard?.prefix ?? '';
+  // BACI-357: the snapshot → optimistic update → persist → reconcile/rollback
+  // → reportError orchestrator the card mutation handlers below route through.
+  const mutate = useOptimisticMutation();
   // BACI-285: a non-empty URL prefix that doesn't match any known board
   // — and isn't a recognised prefix-less legacy page word (those soft-
   // redirect through the <Routes> `*` branch) — is a hard 404 once
@@ -666,46 +670,51 @@ export default function App() {
   const moveCard = useCallback((key: string, toCol: string) => {
     let prevCol: string | null = null;
     let prevBlockedBy: Map<string, BoardCard['blockedBy']> | null = null;
-    setCards(cs => {
-      const prev = cs.find(c => c.key === key);
-      if (!prev || prev.column === toCol) return cs;
-      prevCol = prev.column;
-      const enteringTerminal = isTerminalState(toCol) && !isTerminalState(prevCol);
-      if (enteringTerminal) {
-        // Snapshot only the cards that actually list `key` as a
-        // blocker so rollback can put them back. Cards we didn't
-        // touch stay out of the snapshot map.
-        prevBlockedBy = new Map();
-        for (const c of cs) {
-          if ((c.blockedBy || []).some(b => b.key === key)) {
-            prevBlockedBy.set(c.key, c.blockedBy ?? []);
+    mutate({
+      optimisticUpdate: () => {
+        setCards(cs => {
+          const prev = cs.find(c => c.key === key);
+          if (!prev || prev.column === toCol) return cs;
+          prevCol = prev.column;
+          const enteringTerminal = isTerminalState(toCol) && !isTerminalState(prevCol);
+          if (enteringTerminal) {
+            // Snapshot only the cards that actually list `key` as a
+            // blocker so rollback can put them back. Cards we didn't
+            // touch stay out of the snapshot map.
+            prevBlockedBy = new Map();
+            for (const c of cs) {
+              if ((c.blockedBy || []).some(b => b.key === key)) {
+                prevBlockedBy.set(c.key, c.blockedBy ?? []);
+              }
+            }
           }
-        }
-      }
-      const moved = cs.map(c => c.key === key ? { ...c, column: toCol } : c);
-      return enteringTerminal ? stripBlockerFromCards(moved, key) : moved;
-    });
-    if (prevCol === null) return;
-    const fromCol = prevCol;
-    const blockedBySnapshot = prevBlockedBy;
-    api.setIssueState(activeBoard, key, toCol)
-      .then(() => {
+          const moved = cs.map(c => c.key === key ? { ...c, column: toCol } : c);
+          return enteringTerminal ? stripBlockerFromCards(moved, key) : moved;
+        });
+        // No-op move (card not found / already there) — abort the persist.
+        return prevCol !== null;
+      },
+      persist: () => api.setIssueState(activeBoard, key, toCol),
+      onSuccess: () => {
         // BACI-146: a non-silent refresh covers the reopen edge
         // (terminal → non-terminal) where the server needs to put
         // each affected sibling's `blockedBy` back. One HTTP call
         // per move is cheap and surfaces stale-board errors loudly.
-        if (isTerminalState(fromCol) !== isTerminalState(toCol)) {
+        if (isTerminalState(prevCol!) !== isTerminalState(toCol)) {
           refreshCards();
         }
-      })
-      .catch(err => {
-        reportError(err, { headline: "Couldn't move card" });
+      },
+      rollback: () => {
+        const fromCol = prevCol!;
+        const blockedBySnapshot = prevBlockedBy;
         setCards(cs => {
           const reverted = cs.map(c => c.key === key ? { ...c, column: fromCol } : c);
           return blockedBySnapshot ? restoreBlockedByFromSnapshot(reverted, blockedBySnapshot) : reverted;
         });
-      });
-  }, [activeBoard, refreshCards, setCards]);
+      },
+      errorHeadline: "Couldn't move card",
+    });
+  }, [activeBoard, refreshCards, setCards, mutate]);
 
   // Dispatch a prompt from a card's action button: the backend gates the
   // mode on the issue's state and enqueues a target-less dispatch the
@@ -723,13 +732,17 @@ export default function App() {
   // spinner disappears.
   const dispatchFromCard = useCallback((cardKey: string, mode: string) => {
     const optimistic: WaitingState = { kind: 'queued_no_agent' as WaitingKind, mode: mode as DispatchMode };
-    setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: optimistic } : c));
-    api.dispatchIssue(activeBoard, cardKey, mode)
-      .catch(err => {
+    mutate({
+      optimisticUpdate: () => {
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: optimistic } : c));
+      },
+      persist: () => api.dispatchIssue(activeBoard, cardKey, mode),
+      rollback: () => {
         setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: null } : c));
-        reportError(err, { headline: "Couldn't dispatch agent" });
-      });
-  }, [activeBoard, setCards]);
+      },
+      errorHeadline: "Couldn't dispatch agent",
+    });
+  }, [activeBoard, setCards, mutate]);
 
   // Phase 5 cutover: dispatchChainFromCard / setFollowOnFromCard /
   // cancelFollowOnFromCard / quickEvalComment were board-only affordances
@@ -846,14 +859,18 @@ export default function App() {
   // Engine drive-mode toggle ("off" | "auto"). Optimistic flip on the
   // card so the switch reacts on click; the refresh re-asserts.
   const setCardEngineMode = useCallback((key: string, mode: string) => {
-    setCards(cs => cs.map(c => c.key === key ? { ...c, engineMode: mode } : c));
-    api.setEngineMode(activeBoard, key, mode)
-      .then(() => refreshCards({ silent: true }))
-      .catch(err => {
-        reportError(err, { headline: "Couldn't change the drive mode" });
-        refreshCards({ silent: true });
-      });
-  }, [activeBoard, refreshCards, setCards]);
+    mutate({
+      optimisticUpdate: () => {
+        setCards(cs => cs.map(c => c.key === key ? { ...c, engineMode: mode } : c));
+      },
+      persist: () => api.setEngineMode(activeBoard, key, mode),
+      onSuccess: () => refreshCards({ silent: true }),
+      // No manual revert — a silent refresh reconciles the optimistic flip
+      // back to the server's truth.
+      rollback: () => refreshCards({ silent: true }),
+      errorHeadline: "Couldn't change the drive mode",
+    });
+  }, [activeBoard, refreshCards, setCards, mutate]);
 
   // Fast-track (BACI-311) — collapse the manual drag → pick-process →
   // toggle-Auto flow into one click on a Backlog card. Runs the three
@@ -880,19 +897,23 @@ export default function App() {
   // Optimistic column move mirrors moveCard.
   const shipCardFromPipeline = useCallback((key: string) => {
     let prevCol: string | null = null;
-    setCards(cs => cs.map(c => {
-      if (c.key !== key) return c;
-      prevCol = c.column;
-      return { ...c, column: 'to_be_shipped' };
-    }));
-    api.shipCard(activeBoard, key)
-      .then(() => refreshCards({ silent: true }))
-      .catch(err => {
-        reportError(err, { headline: "Couldn't ship the card" });
+    mutate({
+      optimisticUpdate: () => {
+        setCards(cs => cs.map(c => {
+          if (c.key !== key) return c;
+          prevCol = c.column;
+          return { ...c, column: 'to_be_shipped' };
+        }));
+      },
+      persist: () => api.shipCard(activeBoard, key),
+      onSuccess: () => refreshCards({ silent: true }),
+      rollback: () => {
         const fromCol = prevCol;
         if (fromCol) setCards(cs => cs.map(c => c.key === key ? { ...c, column: fromCol } : c));
-      });
-  }, [activeBoard, refreshCards, setCards]);
+      },
+      errorHeadline: "Couldn't ship the card",
+    });
+  }, [activeBoard, refreshCards, setCards, mutate]);
 
   // BACI-352: Mark-done hand-off — close an in_pipeline card out as done
   // directly, bypassing the Shipping column and the ship agent. The direct-
@@ -901,19 +922,24 @@ export default function App() {
   // to reconcile — matching the drag-to-done path's visible refresh.
   const markDoneCardFromPipeline = useCallback((key: string) => {
     let prevCol: string | null = null;
-    setCards(cs => cs.map(c => {
-      if (c.key !== key) return c;
-      prevCol = c.column;
-      return { ...c, column: 'done' };
-    }));
-    api.markDoneCard(activeBoard, key)
-      .then(() => refreshCards())
-      .catch(err => {
-        reportError(err, { headline: "Couldn't mark the card done" });
+    mutate({
+      optimisticUpdate: () => {
+        setCards(cs => cs.map(c => {
+          if (c.key !== key) return c;
+          prevCol = c.column;
+          return { ...c, column: 'done' };
+        }));
+      },
+      persist: () => api.markDoneCard(activeBoard, key),
+      // Non-silent refresh — matches the drag-to-done path's visible refresh.
+      onSuccess: () => refreshCards(),
+      rollback: () => {
         const fromCol = prevCol;
         if (fromCol) setCards(cs => cs.map(c => c.key === key ? { ...c, column: fromCol } : c));
-      });
-  }, [activeBoard, refreshCards, setCards]);
+      },
+      errorHeadline: "Couldn't mark the card done",
+    });
+  }, [activeBoard, refreshCards, setCards, mutate]);
 
   // BACI-268: trash-bin drag-to-cancel. Routes a card dropped onto the
   // Pipeline's trash bin through the terminal-move path — moveCard already
@@ -957,25 +983,30 @@ export default function App() {
   const onBlockCard = useCallback((sourceKey: string, targetKey: string) => {
     if (!sourceKey || !targetKey || sourceKey === targetKey) return;
     let prevBlockedBy: BoardCard['blockedBy'] | null = null;
-    setCards(cs => {
-      const source = cs.find(c => c.key === sourceKey);
-      const target = cs.find(c => c.key === targetKey);
-      if (!source || !target) return cs;
-      const existing = source.blockedBy || [];
-      if (existing.some(b => b.key === targetKey)) return cs; // already blocked — no-op
-      prevBlockedBy = existing;
-      const nextBlockedBy = [...existing, { key: targetKey, state: target.column as State }];
-      return cs.map(c => c.key === sourceKey ? { ...c, blockedBy: nextBlockedBy } : c);
-    });
-    if (prevBlockedBy === null) return; // guard tripped — nothing to persist
-    const snapshot = prevBlockedBy;
-    api.createRelation(activeBoard, targetKey, sourceKey)
-      .then(() => refreshCards({ silent: true }))
-      .catch(err => {
-        reportError(err, { headline: "Couldn't link cards" });
+    mutate({
+      optimisticUpdate: () => {
+        setCards(cs => {
+          const source = cs.find(c => c.key === sourceKey);
+          const target = cs.find(c => c.key === targetKey);
+          if (!source || !target) return cs;
+          const existing = source.blockedBy || [];
+          if (existing.some(b => b.key === targetKey)) return cs; // already blocked — no-op
+          prevBlockedBy = existing;
+          const nextBlockedBy = [...existing, { key: targetKey, state: target.column as State }];
+          return cs.map(c => c.key === sourceKey ? { ...c, blockedBy: nextBlockedBy } : c);
+        });
+        return prevBlockedBy !== null; // guard tripped — nothing to persist
+      },
+      persist: () => api.createRelation(activeBoard, targetKey, sourceKey),
+      onSuccess: () => refreshCards({ silent: true }),
+      rollback: () => {
+        if (prevBlockedBy === null) return;
+        const snapshot = prevBlockedBy;
         setCards(cs => cs.map(c => c.key === sourceKey ? { ...c, blockedBy: snapshot } : c));
-      });
-  }, [activeBoard, refreshCards, setCards]);
+      },
+      errorHeadline: "Couldn't link cards",
+    });
+  }, [activeBoard, refreshCards, setCards, mutate]);
 
   // Per-repo Shipping auto-ship toggle. PipelineView owns the display
   // state (seeded from localStorage — the backend exposes no GET); this
