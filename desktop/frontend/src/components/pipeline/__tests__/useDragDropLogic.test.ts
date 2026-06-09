@@ -147,3 +147,37 @@ describe('useDragDropLogic — drag-to-block classification', () => {
     expect(result.current.blockDragKey).toBeNull();
   });
 });
+
+describe('useDragDropLogic — stable card handlers (BACI-366)', () => {
+  // dropOnCard / dropBlockOnCard are the two handlers the React.memo'd cards
+  // consume, so they must keep a constant identity across re-renders (poll /
+  // drag-state churn) or the memo never bites — while still reading the latest
+  // card lookup and drag key via refs.
+  it('dropOnCard / dropBlockOnCard keep a stable identity across re-renders', () => {
+    const handlers: DragDropHandlers = { onReorder: vi.fn(), onBlockCard: vi.fn() };
+    const { result, rerender } = renderHook(
+      ({ map }) => useDragDropLogic(map, handlers),
+      { initialProps: { map: cardByKey } },
+    );
+    const firstDrop = result.current.dropOnCard;
+    const firstBlockDrop = result.current.dropBlockOnCard;
+    // Re-render with a *new* Map identity (what the 10s poll does) + a drag
+    // state change.
+    act(() => result.current.setDragKey('BACI-1'));
+    rerender({ map: new Map(cardByKey) });
+    expect(result.current.dropOnCard).toBe(firstDrop);
+    expect(result.current.dropBlockOnCard).toBe(firstBlockDrop);
+  });
+
+  it('the stable dropOnCard still reads the latest drag key after a re-render', () => {
+    const handlers: DragDropHandlers = { onReorder: vi.fn() };
+    const { result, rerender } = renderHook(
+      ({ map }) => useDragDropLogic(map, handlers),
+      { initialProps: { map: cardByKey } },
+    );
+    act(() => result.current.setDragKey('BACI-1'));
+    rerender({ map: new Map(cardByKey) }); // identity churns; ref must stay fresh
+    act(() => result.current.dropOnCard(B, 1));
+    expect(handlers.onReorder).toHaveBeenCalledWith('BACI-1', 2);
+  });
+});

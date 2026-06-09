@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import Icon from '../Icon';
 import CardHead from './CardHead';
 import CardTitleBlock from './CardTitleBlock';
 import CardLabels from './CardLabels';
 import { blockDragClass, blockDropProps } from './blockDrag';
 import type { BlockKind } from './blockDrag';
+import { cardPropsEqual } from './memoCard';
 import type { BoardCard } from '../../api';
 
 // PipelineCard — the compact issue card for Backlog and Shipping. Issue
@@ -28,20 +29,23 @@ type PipelineCardProps = {
   blockKind?: BlockKind;
   onBlockDragStart?: (key: string) => void;
   onBlockDragEnd?: () => void;
-  onBlockDrop?: () => void;
-  onOpen?: () => void;
+  // These four take the card / key / index so the parent can pass a stable
+  // handler identity (the card binds its own data internally) — required for
+  // the React.memo below to skip the poll re-render. See memoCard.ts.
+  onBlockDrop?: (card: BoardCard) => void;
+  onOpen?: (card: BoardCard) => void;
   onOpenIssue?: (key: string) => void;
   onHighlight?: (key: string | null) => void;
-  onDragStart?: () => void;
+  onDragStart?: (key: string) => void;
   onDragEnd?: () => void;
-  onDropCard?: () => void;
+  onDropCard?: (card: BoardCard, index: number) => void;
   onMoveCard?: (key: string, col: string) => void;
   onFastTrack?: (key: string) => void;
   onShipDispatch?: (key: string, mode: string) => void;
   onCancelWaiting?: (key: string) => void;
 };
 
-export default function PipelineCard({
+function PipelineCard({
   card,
   activeBoard,
   index,
@@ -78,18 +82,20 @@ export default function PipelineCard({
   // the muted not-allowed variant (so the no-op is visible before the
   // drop). blockKind is null whenever no block-drag is active.
   const blockClass = blockDragClass(blockKind);
-  const blockProps = blockDropProps(blockKind, onBlockDrop);
+  // The card binds its own data to the stable parent handlers here, internally,
+  // so the props it receives stay referentially stable across the poll.
+  const blockProps = blockDropProps(blockKind, onBlockDrop ? () => onBlockDrop(card) : undefined);
 
   return (
     <article
       className={`mk-pl-card${isDragging ? ' is-dragging' : ''}${over ? ' is-drop-before' : ''}${shippingInFlight ? ' is-shipping' : ''}${isHighlighted ? ' is-blocker-hl' : ''}${blockClass}`}
       draggable
-      onDragStart={onDragStart}
+      onDragStart={() => onDragStart?.(card.key)}
       onDragEnd={onDragEnd}
       onDragOver={blockKind ? blockProps.onDragOver : (e) => { e.preventDefault(); e.stopPropagation(); setOver(true); }}
       onDragLeave={blockKind ? undefined : () => setOver(false)}
-      onDrop={blockKind ? blockProps.onDrop : (e) => { e.preventDefault(); e.stopPropagation(); setOver(false); onDropCard?.(); }}
-      onClick={onOpen}
+      onDrop={blockKind ? blockProps.onDrop : (e) => { e.preventDefault(); e.stopPropagation(); setOver(false); onDropCard?.(card, index ?? 0); }}
+      onClick={() => onOpen?.(card)}
     >
       {showBadge && (
         <span
@@ -180,3 +186,9 @@ export default function PipelineCard({
     </article>
   );
 }
+
+// React.memo'd (BACI-366): with the parent now passing stable callbacks, the
+// only churning prop is `card`, which cardPropsEqual compares by value — so the
+// 10s board poll re-renders only the cards whose data actually changed instead
+// of cascading through every card's subtree.
+export default memo(PipelineCard, cardPropsEqual);

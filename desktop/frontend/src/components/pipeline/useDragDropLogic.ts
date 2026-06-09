@@ -1,8 +1,26 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { useDragState } from './useDragState';
 import type { DragState } from './useDragState';
 import type { BlockKind } from './blockDrag';
 import type { BoardCard } from '../../api';
+
+// classifyBlockTarget — the pure BACI-342 drag-to-block classification, shared
+// by the render-time `blockTargetKind` (live state) and the stable
+// `dropBlockOnCard` event handler (latest-ref state) so the two can't drift.
+// Returns null when no block-drag is active or the card is out of scope
+// (Shipping); otherwise 'source' (the dragged card itself), 'dup' (already
+// blocked by this card) or 'target' (a valid edge to create).
+function classifyBlockTarget(
+  card: BoardCard,
+  blockDragKey: string | null,
+  cardByKey: Map<string, BoardCard>,
+): BlockKind {
+  if (!blockDragKey || card.column === 'to_be_shipped') return null;
+  if (card.key === blockDragKey) return 'source';
+  const source = cardByKey.get(blockDragKey);
+  if (source && (source.blockedBy || []).some(b => b.key === card.key)) return 'dup';
+  return 'target';
+}
 
 // DragDropHandlers — the card mutations the drop logic routes to. All
 // optional so the hook is happy in a partially-wired test / loading state,
@@ -52,7 +70,29 @@ export function useDragDropLogic(
 ): DragDropLogic {
   const drag = useDragState();
   const { dragKey, setDragKey, setDragOverCol, blockDragKey, setBlockDragKey } = drag;
-  const { onMoveCard, onShip, onReorder, onCancelCard, onDoneCard, onBlockCard } = handlers;
+  // onMoveCard / onShip / onCancelCard / onDoneCard feed the plain column &
+  // terminal-zone drop handlers below; onReorder / onBlockCard are read via
+  // handlersRef inside the stable card handlers, so they aren't destructured.
+  const { onMoveCard, onShip, onCancelCard, onDoneCard } = handlers;
+
+  // Latest-value refs so the two card-facing drop handlers (dropOnCard /
+  // dropBlockOnCard) can stay referentially stable. The two hot pipeline cards
+  // are React.memo'd (BACI-366), and the board re-fetches `cards` on the 10s
+  // poll — so a handler whose identity churned every render would defeat the
+  // memo and re-render every card on every tick. A stable useCallback reading
+  // these refs gives the cards a constant callback that still sees the freshest
+  // card lookup / drag key / mutation handlers. Same latest-ref pattern as
+  // useAsyncResource / useOptimisticToggle.
+  const cardByKeyRef = useRef(cardByKey);
+  const dragKeyRef = useRef(dragKey);
+  const blockDragKeyRef = useRef(blockDragKey);
+  const handlersRef = useRef(handlers);
+  useEffect(() => {
+    cardByKeyRef.current = cardByKey;
+    dragKeyRef.current = dragKey;
+    blockDragKeyRef.current = blockDragKey;
+    handlersRef.current = handlers;
+  });
 
   // Move a card into `col` (= its new state). in_pipeline → Shipping goes
   // through the Ship hand-off; everything else is a plain state move. Shared
@@ -82,48 +122,48 @@ export function useDragDropLogic(
   // The card's own onDrop stops propagation, so the column drop zone never
   // sees the event — without the cross-column branch here the move silently
   // no-ops, which is BACI-269 (drag In Pipeline card onto a Backlog card).
-  const dropOnCard = (targetCard: BoardCard, index: number) => {
-    const key = dragKey;
+  // Stable (latest-ref) so the memo'd cards keep a constant onDropCard.
+  const dropOnCard = useCallback((targetCard: BoardCard, index: number) => {
+    const key = dragKeyRef.current;
     setDragKey(null);
     setDragOverCol(null);
     if (!key || key === targetCard.key) return;
-    const dragged = cardByKey.get(key);
+    const dragged = cardByKeyRef.current.get(key);
     if (!dragged) return;
+    const h = handlersRef.current;
     if (dragged.column !== targetCard.column) {
-      moveCardToColumn(dragged, targetCard.column);
+      // Cross-column move — in_pipeline → Shipping routes through the Ship
+      // hand-off, everything else is a plain state move (mirrors
+      // moveCardToColumn, kept inline so the handler reads only stable refs).
+      if (targetCard.column === 'to_be_shipped' && dragged.column === 'in_pipeline') {
+        h.onShip?.(dragged.key);
+      } else {
+        h.onMoveCard?.(dragged.key, targetCard.column);
+      }
       return;
     }
-    onReorder?.(key, index + 1);
-  };
+    h.onReorder?.(key, index + 1);
+  }, [setDragKey, setDragOverCol]);
 
   // BACI-342 drag-to-block: classify a card as a drop target while a
-  // block-drag is in flight. Returns null when no block-drag is active or
-  // the card is out of scope (Shipping — blocking semantics aren't
-  // actionable on a card already shipping), so the gesture is gated to
-  // Backlog / In-Pipeline cards. Otherwise:
-  //   'source' — the dragged card itself (self-drop is a no-op);
-  //   'dup'    — the source is already blocked by this card (no-op);
-  //   'target' — a valid drop that would create the blocks edge.
-  // The source/dup cards render a muted not-allowed variant so the user
-  // sees the no-op before releasing.
-  const blockTargetKind = (card: BoardCard): BlockKind => {
-    if (!blockDragKey || card.column === 'to_be_shipped') return null;
-    if (card.key === blockDragKey) return 'source';
-    const source = cardByKey.get(blockDragKey);
-    if (source && (source.blockedBy || []).some(b => b.key === card.key)) return 'dup';
-    return 'target';
-  };
+  // block-drag is in flight (render-time, against live state — drives the
+  // per-card `blockKind` highlight). Gated to Backlog / In-Pipeline cards;
+  // the source/dup cards render a muted not-allowed variant so the user sees
+  // the no-op before releasing.
+  const blockTargetKind = (card: BoardCard): BlockKind =>
+    classifyBlockTarget(card, blockDragKey, cardByKey);
 
-  // Drop a block-drag onto a card. Only a 'target' classification creates
-  // the edge (source/dup are silent no-ops); clearing blockDragKey happens
-  // unconditionally so a no-op drop still ends the gesture.
-  const dropBlockOnCard = (targetCard: BoardCard) => {
-    const sourceKey = blockDragKey;
+  // Drop a block-drag onto a card. Only a 'target' classification creates the
+  // edge (source/dup are silent no-ops); clearing blockDragKey happens
+  // unconditionally so a no-op drop still ends the gesture. Stable
+  // (latest-ref) so the memo'd cards keep a constant onBlockDrop.
+  const dropBlockOnCard = useCallback((targetCard: BoardCard) => {
+    const sourceKey = blockDragKeyRef.current;
     setBlockDragKey(null);
     if (!sourceKey) return;
-    if (blockTargetKind(targetCard) !== 'target') return;
-    onBlockCard?.(sourceKey, targetCard.key);
-  };
+    if (classifyBlockTarget(targetCard, sourceKey, cardByKeyRef.current) !== 'target') return;
+    handlersRef.current.onBlockCard?.(sourceKey, targetCard.key);
+  }, [setBlockDragKey]);
 
   const colDropProps = (col: string): DropZoneProps => ({
     onDragOver: (e) => { e.preventDefault(); setDragOverCol(col); },
