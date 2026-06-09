@@ -10,6 +10,7 @@ import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
 import { stageLabel, stageGlyph, isShipStage, isShelveStage, isMarkDoneStage } from '../lib/pipelineProcesses';
 import { blockedByMode } from '../lib/blockedByBadge';
+import { useOptimisticToggle } from '../lib/hooks/useOptimisticToggle';
 import * as api from '../api';
 import type {
   BoardCard,
@@ -291,7 +292,10 @@ export default function PipelineView({
   // In Pipeline + Shipping columns get the full width. Persisted per-repo
   // in the tui_settings KV — seeded from the backend GET, same pattern as
   // autoShip below. It overrides the transient `expanded` grid toggle.
-  const [collapsed, setCollapsed] = useState(false);
+  // BACI-357: the optimistic flip + persist + silent revert lives in
+  // useOptimisticToggle; the fetch effect below seeds via setCollapsed.
+  const { value: collapsed, setValue: setCollapsed, toggle: toggleCollapsed } =
+    useOptimisticToggle(false, (next) => onSetBacklogCollapsed?.(next));
   const [dragKey, setDragKey] = useState<string | null>(null);
   // Holds the column the dragged card is currently over, driving the
   // `is-drop` highlight. BACI-268 widens the value space with a non-column
@@ -302,13 +306,15 @@ export default function PipelineView({
   // autoShip seeds from the backend (GET /auto-ship) — the DB value the
   // controller's auto-ship ticker actually acts on — so the toggle
   // reflects the source of truth across machines, not a local cache.
-  const [autoShip, setAutoShip] = useState(false);
+  const { value: autoShip, setValue: setAutoShip, toggle: toggleAutoShip } =
+    useOptimisticToggle(false, (next) => onSetAutoShip?.(next));
   // impactPrimary (BACI-349) flips every card from title-primary (the
   // default) to customer-impact-primary (the impact line as the card head,
   // title demoted to a subtitle) for cards whose customer_impact is set.
   // Per-repo display chrome persisted in the tui_settings KV — seeded from
   // the backend GET, same pattern as autoShip / collapsed.
-  const [impactPrimary, setImpactPrimary] = useState(false);
+  const { value: impactPrimary, setValue: setImpactPrimary, toggle: toggleImpactPrimary } =
+    useOptimisticToggle(false, (next) => onSetImpactPrimary?.(next));
   // highlightKey (BACI-310): the issue key of the blocker currently being
   // hovered in some card's blocked-by badge. The card whose key matches
   // paints itself red (.is-blocker-hl). A no-op when the hovered blocker
@@ -333,7 +339,7 @@ export default function PipelineView({
       .then((v) => { if (!cancelled) setAutoShip(!!v); })
       .catch(() => { if (!cancelled) setAutoShip(false); });
     return () => { cancelled = true; };
-  }, [activeBoard]);
+  }, [activeBoard, setAutoShip]);
 
   useEffect(() => {
     if (!activeBoard) { setCollapsed(false); return; }
@@ -342,7 +348,7 @@ export default function PipelineView({
       .then((v) => { if (!cancelled) setCollapsed(!!v); })
       .catch(() => { if (!cancelled) setCollapsed(false); });
     return () => { cancelled = true; };
-  }, [activeBoard]);
+  }, [activeBoard, setCollapsed]);
 
   useEffect(() => {
     if (!activeBoard) { setImpactPrimary(false); return; }
@@ -351,40 +357,13 @@ export default function PipelineView({
       .then((v) => { if (!cancelled) setImpactPrimary(!!v); })
       .catch(() => { if (!cancelled) setImpactPrimary(false); });
     return () => { cancelled = true; };
-  }, [activeBoard]);
+  }, [activeBoard, setImpactPrimary]);
 
   const list = useMemo(() => cards || [], [cards]);
   const backlog = useMemo(() => list.filter(c => c.column === 'todo'), [list]);
   const inPipeline = useMemo(() => list.filter(c => c.column === 'in_pipeline'), [list]);
   const shipping = useMemo(() => list.filter(c => c.column === 'to_be_shipped'), [list]);
   const cardByKey = useMemo(() => new Map(list.map((c): [string, BoardCard] => [c.key, c])), [list]);
-
-  const toggleAutoShip = useCallback(() => {
-    const next = !autoShip;
-    setAutoShip(next); // optimistic
-    Promise.resolve(onSetAutoShip?.(next)).catch(() => {
-      // Revert the optimistic flip if the PUT failed.
-      setAutoShip(!next);
-    });
-  }, [autoShip, onSetAutoShip]);
-
-  const toggleCollapsed = useCallback(() => {
-    const next = !collapsed;
-    setCollapsed(next); // optimistic
-    Promise.resolve(onSetBacklogCollapsed?.(next)).catch(() => {
-      // Revert the optimistic flip if the PUT failed.
-      setCollapsed(!next);
-    });
-  }, [collapsed, onSetBacklogCollapsed]);
-
-  const toggleImpactPrimary = useCallback(() => {
-    const next = !impactPrimary;
-    setImpactPrimary(next); // optimistic
-    Promise.resolve(onSetImpactPrimary?.(next)).catch(() => {
-      // Revert the optimistic flip if the PUT failed.
-      setImpactPrimary(!next);
-    });
-  }, [impactPrimary, onSetImpactPrimary]);
 
   // Move a card into `col` (= its new state). in_pipeline → Shipping goes
   // through the Ship hand-off; everything else is a plain state move. Shared
