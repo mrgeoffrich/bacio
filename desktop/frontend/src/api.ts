@@ -41,6 +41,8 @@ export type {
   AgentCard,
   ClaimDTO,
   DispatchDTO,
+  QuestionDTO,
+  SessionTodoDTO,
   DocSummary,
   DocContent,
   DocLinkDTO,
