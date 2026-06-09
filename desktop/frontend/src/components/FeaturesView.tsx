@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, lazy, Suspense } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { EyeOff, Search, X } from 'lucide-react';
 import { reportError } from '../errors';
+import { useOptimisticMutation } from '../lib/hooks/useOptimisticMutation';
 import * as api from '../api';
 import type {
   FeatureSummary,
@@ -613,6 +614,18 @@ function FeatureOverviewSections({
   onDetailChange,
   onFeaturesChange,
 }: FeatureOverviewSectionsProps) {
+  // BACI-357: the property toggles below route their api round-trip through
+  // useOptimisticMutation — it owns the reportError-on-failure half of the
+  // dance. These toggles stay await-then-apply (no optimistic flip): they
+  // apply the server's returned FeatureDetail, then refresh the summary list.
+  // The visible optimistic flip lands in Phase 4b's FeaturePropertyToggle.
+  const mutate = useOptimisticMutation();
+  // Best-effort summary-list refresh after a property change so the left-rail
+  // pills re-render; a failure is non-fatal — the next selection refresh picks
+  // it up (matches the pre-BACI-357 inner try/catch).
+  const refreshFeatures = () => {
+    api.listFeatures(activeBoard).then(onFeaturesChange).catch(() => {});
+  };
   return (
     <>
       <section className="mk-features-properties">
@@ -632,24 +645,17 @@ function FeatureOverviewSections({
                     current === opt.id ? 'is-active' : ''
                   }`}
                   aria-pressed={current === opt.id}
-                  onClick={async () => {
+                  onClick={() => {
                     if (current === opt.id) return;
-                    try {
-                      const updated = await api.setFeatureState(
-                        activeBoard,
-                        detail.slug,
-                        opt.id,
-                      );
-                      onDetailChange(updated);
-                      try {
-                        const feats = await api.listFeatures(activeBoard);
-                        onFeaturesChange(feats);
-                      } catch {
-                        // non-fatal — next selection refresh picks it up.
-                      }
-                    } catch (err) {
-                      reportError(err, { headline: "Couldn't update state" });
-                    }
+                    mutate({
+                      persist: () =>
+                        api.setFeatureState(activeBoard, detail.slug, opt.id),
+                      onSuccess: (updated) => {
+                        onDetailChange(updated);
+                        refreshFeatures();
+                      },
+                      errorHeadline: "Couldn't update state",
+                    });
                   }}
                 >
                   {opt.label}
@@ -675,26 +681,17 @@ function FeatureOverviewSections({
                     autoClose === opt.id ? 'is-active' : ''
                   }`}
                   aria-pressed={autoClose === opt.id}
-                  onClick={async () => {
+                  onClick={() => {
                     if (autoClose === opt.id) return;
-                    try {
-                      const updated = await api.setFeatureAutoClose(
-                        activeBoard,
-                        detail.slug,
-                        opt.id,
-                      );
-                      onDetailChange(updated);
-                      try {
-                        const feats = await api.listFeatures(activeBoard);
-                        onFeaturesChange(feats);
-                      } catch {
-                        // non-fatal — next selection refresh picks it up.
-                      }
-                    } catch (err) {
-                      reportError(err, {
-                        headline: "Couldn't update auto-close",
-                      });
-                    }
+                    mutate({
+                      persist: () =>
+                        api.setFeatureAutoClose(activeBoard, detail.slug, opt.id),
+                      onSuccess: (updated) => {
+                        onDetailChange(updated);
+                        refreshFeatures();
+                      },
+                      errorHeadline: "Couldn't update auto-close",
+                    });
                   }}
                 >
                   {opt.label}
@@ -728,26 +725,17 @@ function FeatureOverviewSections({
                     collect === opt.id ? 'is-active' : ''
                   }`}
                   aria-pressed={collect === opt.id}
-                  onClick={async () => {
+                  onClick={() => {
                     if (collect === opt.id) return;
-                    try {
-                      const updated = await api.setFeatureCollectHandoffs(
-                        activeBoard,
-                        detail.slug,
-                        opt.id,
-                      );
-                      onDetailChange(updated);
-                      try {
-                        const feats = await api.listFeatures(activeBoard);
-                        onFeaturesChange(feats);
-                      } catch {
-                        // non-fatal — next selection refresh picks it up.
-                      }
-                    } catch (err) {
-                      reportError(err, {
-                        headline: "Couldn't update collect-handoffs",
-                      });
-                    }
+                    mutate({
+                      persist: () =>
+                        api.setFeatureCollectHandoffs(activeBoard, detail.slug, opt.id),
+                      onSuccess: (updated) => {
+                        onDetailChange(updated);
+                        refreshFeatures();
+                      },
+                      errorHeadline: "Couldn't update collect-handoffs",
+                    });
                   }}
                 >
                   {opt.label}
@@ -781,29 +769,20 @@ function FeatureOverviewSections({
                     shown === opt.id ? 'is-active' : ''
                   }`}
                   aria-pressed={shown === opt.id}
-                  onClick={async () => {
+                  onClick={() => {
                     if (shown === opt.id) return;
-                    try {
-                      const updated = await api.setFeatureHiddenOnBoard(
-                        activeBoard,
-                        detail.slug,
-                        !opt.id,
-                      );
-                      onDetailChange(updated);
-                      if (typeof onChangeHidden === 'function') {
-                        onChangeHidden();
-                      }
-                      try {
-                        const feats = await api.listFeatures(activeBoard);
-                        onFeaturesChange(feats);
-                      } catch {
-                        // non-fatal — next selection refresh picks it up.
-                      }
-                    } catch (err) {
-                      reportError(err, {
-                        headline: "Couldn't update visibility",
-                      });
-                    }
+                    mutate({
+                      persist: () =>
+                        api.setFeatureHiddenOnBoard(activeBoard, detail.slug, !opt.id),
+                      onSuccess: (updated) => {
+                        onDetailChange(updated);
+                        if (typeof onChangeHidden === 'function') {
+                          onChangeHidden();
+                        }
+                        refreshFeatures();
+                      },
+                      errorHeadline: "Couldn't update visibility",
+                    });
                   }}
                 >
                   {opt.label}
