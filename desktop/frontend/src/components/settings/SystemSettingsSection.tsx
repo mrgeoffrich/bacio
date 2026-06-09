@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import Modal from '../Modal';
+import React, { useState, useEffect } from 'react';
 import Tooltip from '../Tooltip';
-import { reportError } from '../../errors';
-import * as api from '../../api';
-import type { PromptTemplateDTO } from '../../api';
+import { useTimezoneOptions } from './useTimezoneOptions';
+import { EMPTY_NEW_TEMPLATE, useTemplateManagement } from './useTemplateManagement';
+import TemplateAddForm from './TemplateAddForm';
+import TemplateRow from './TemplateRow';
+import ConfirmModal from './ConfirmModal';
 
 // BACI-248: System Settings section — the global, app-wide preferences
 // pane carved out of the old single-scroll SettingsView body. Mounted
@@ -14,8 +15,11 @@ import type { PromptTemplateDTO } from '../../api';
 // for so the user can see at a glance which preferences live on this
 // browser vs the shared store.
 //
-// Props mirror what App.tsx already passes — no behaviour change
-// beyond the layout reshape.
+// BACI-364: the dense prompt-template manager (the 8-useState CRUD cluster
+// + its rows / forms / confirm modals) now lives behind useTemplateManagement
+// and the TemplateRow / TemplateAddForm / ConfirmModal components — this file
+// is the form shell. Props mirror what App.tsx already passes — no behaviour
+// change beyond the layout reshape.
 
 const THEME_OPTIONS = [
   { id: 'system', label: 'System' },
@@ -31,15 +35,6 @@ const ON_OFF_OPTIONS = [
   { id: false, label: 'Off' },
   { id: true, label: 'On' },
 ];
-
-// EMPTY_NEW_TEMPLATE is the seed state for the "Add template" inline form.
-// actionLabel (BACI-67) is optional — an empty string is the "no override,
-// derive from the gerund name" sentinel the backend honours.
-type NewTemplateDraft = { slug: string; name: string; body: string; actionLabel: string };
-const EMPTY_NEW_TEMPLATE: NewTemplateDraft = { slug: '', name: '', body: '', actionLabel: '' };
-
-// RenameDraft is the rename-overlay form state — `null` when closed.
-type RenameDraft = { slug: string; newSlug: string; newName: string };
 
 // ScopeChip renders the small "Client" / "Server" pill rendered next
 // to the row label inside System. Client = stored in browser
@@ -86,37 +81,8 @@ export default function SystemSettingsSection({
   onChangeTimezone,
   onTemplatesChanged,
 }: SystemSettingsSectionProps) {
-  // BACI-312: the IANA zone list for the timezone picker, sourced from
-  // the browser's own tz database via Intl.supportedValuesOf. Memoised —
-  // the list is large (~400 zones) and never changes for a session. The
-  // try/catch covers older engines that lack supportedValuesOf: we fall
-  // back to a tiny seed plus whatever's currently stored / detected so
-  // the picker still renders something selectable.
-  const timezoneOptions = useMemo(() => {
-    let zones: string[] = [];
-    // Intl.supportedValuesOf is ES2022; the project's lib target is ES2020,
-    // so the global Intl type doesn't declare it. Narrow through a precise
-    // optional-method view rather than reaching for `any`. The try/catch
-    // (plus the optional call) covers engines that lack it entirely.
-    const intl = Intl as typeof Intl & {
-      supportedValuesOf?: (key: 'timeZone') => string[];
-    };
-    try {
-      zones = intl.supportedValuesOf?.('timeZone') ?? ['UTC'];
-    } catch {
-      zones = ['UTC'];
-    }
-    const set = new Set(zones);
-    // Always include the currently-stored value + the browser's own zone
-    // so neither can ever be unselectable (e.g. a stored zone the engine
-    // doesn't list, or a fresh DB before the auto-detect write lands).
-    if (timezone) set.add(timezone);
-    try {
-      const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (browser) set.add(browser);
-    } catch { /* Intl unavailable — the seed list still renders */ }
-    return Array.from(set).sort();
-  }, [timezone]);
+  const timezoneOptions = useTimezoneOptions(timezone);
+
   // BACI-162: local draft for the retention-days input. We commit to
   // the App-owned state via onChangeArchivePreferences on blur (rather
   // than every keystroke) so a half-typed value doesn't round-trip
@@ -127,176 +93,29 @@ export default function SystemSettingsSection({
     setRetentionDraft(String(archiveRetentionDays));
   }, [archiveRetentionDays]);
 
-  const [templates, setTemplates] = useState<PromptTemplateDTO[]>([]);
-  const [placeholders, setPlaceholders] = useState<string[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [savingSlug, setSavingSlug] = useState<string | null>(null);
-  const [bacioVer, setBacioVer] = useState('');
-
-  // Add-template inline form. `null` = collapsed; an object = open.
-  const [adding, setAdding] = useState<NewTemplateDraft | null>(null);
-  // Rename overlay state: { slug, newSlug, newName } when open.
-  const [renaming, setRenaming] = useState<RenameDraft | null>(null);
-  // Confirm overlays.
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-  const [pendingRestore, setPendingRestore] = useState(false);
-
-  const refreshTemplates = useCallback(async () => {
-    const tpls = await api.listPromptTemplates();
-    setTemplates(tpls);
-    setDrafts(Object.fromEntries(tpls.map(t => [t.slug, t.body])));
-    return tpls;
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    // BACI-50 closed the web-mode CRUD gap — every affordance below is
-    // available in both desktop and web.
-    Promise.all([refreshTemplates(), api.promptPlaceholders(), api.bacioVersion()])
-      .then(([, ph, ver]) => {
-        if (cancelled) return;
-        setPlaceholders(ph);
-        setBacioVer(ver);
-      })
-      .catch(err => { if (!cancelled) reportError(err, { headline: "Couldn't load templates" }); });
-    return () => { cancelled = true; };
-  }, [refreshTemplates]);
-
-  // Each mutating path threads through these helpers so the promptConfig
-  // up in App.tsx stays in sync without waiting for the Settings screen
-  // to close.
-  const notifyTemplatesChanged = useCallback(() => {
-    if (typeof onTemplatesChanged === 'function') onTemplatesChanged();
-  }, [onTemplatesChanged]);
-
-  const saveTemplate = useCallback(async (slug: string, body: string) => {
-    setSavingSlug(slug);
-    try {
-      const updated = await api.savePromptTemplate(slug, body);
-      setTemplates(prev => prev.map(t => (t.slug === slug ? updated : t)));
-      setDrafts(prev => ({ ...prev, [slug]: updated.body }));
-      notifyTemplatesChanged();
-    } catch (err) {
-      reportError(err, { headline: "Couldn't save template body" });
-    } finally {
-      setSavingSlug(null);
-    }
-  }, [notifyTemplatesChanged]);
-
-  // BACI-51: persist a template's per-(repo, slug) in-flight cap. The
-  // matcher reads this column on every tick to decide whether to bind
-  // another queued dispatch. 0 = unlimited; built-in ship seeds to 1
-  // so merging serialises. Validation (>=0) lives in the store.
-  const saveConcurrency = useCallback(async (slug: string, limit: number) => {
-    setSavingSlug(slug);
-    try {
-      const updated = await api.savePromptConcurrency(slug, limit);
-      setTemplates(prev => prev.map(t => (t.slug === slug ? updated : t)));
-      notifyTemplatesChanged();
-    } catch (err) {
-      reportError(err, { headline: "Couldn't save concurrency limit" });
-    } finally {
-      setSavingSlug(null);
-    }
-  }, [notifyTemplatesChanged]);
-
-  // BACI-67: persist the imperative action_label override — the verb the
-  // dispatch action menus render on the kanban-card + issue-workspace
-  // dropdowns. An empty string clears the override; the UI then derives
-  // a default from the gerund display name (the validator on the Go side
-  // accepts the empty value as the "no override" sentinel).
-  const saveActionLabel = useCallback(async (slug: string, actionLabel: string) => {
-    setSavingSlug(slug);
-    try {
-      const updated = await api.savePromptActionLabel(slug, actionLabel);
-      setTemplates(prev => prev.map(t => (t.slug === slug ? updated : t)));
-      notifyTemplatesChanged();
-    } catch (err) {
-      reportError(err, { headline: "Couldn't save action label" });
-    } finally {
-      setSavingSlug(null);
-    }
-  }, [notifyTemplatesChanged]);
-
-  const commitAdd = useCallback(async () => {
-    if (!adding) return;
-    setSavingSlug(adding.slug || '__new__');
-    try {
-      await api.addPromptTemplate(adding.slug, adding.name, adding.body, adding.actionLabel || '');
-      setAdding(null);
-      await refreshTemplates();
-      notifyTemplatesChanged();
-    } catch (err) {
-      reportError(err, { headline: "Couldn't add template" });
-    } finally {
-      setSavingSlug(null);
-    }
-  }, [adding, notifyTemplatesChanged, refreshTemplates]);
-
-  const commitRename = useCallback(async () => {
-    if (!renaming) return;
-    setSavingSlug(renaming.slug);
-    try {
-      await api.renamePromptTemplate(renaming.slug, renaming.newSlug, renaming.newName);
-      setRenaming(null);
-      await refreshTemplates();
-      notifyTemplatesChanged();
-    } catch (err) {
-      reportError(err, { headline: "Couldn't rename template" });
-    } finally {
-      setSavingSlug(null);
-    }
-  }, [renaming, notifyTemplatesChanged, refreshTemplates]);
-
-  const commitDelete = useCallback(async () => {
-    if (!pendingDelete) return;
-    setSavingSlug(pendingDelete);
-    try {
-      await api.deletePromptTemplate(pendingDelete);
-      setPendingDelete(null);
-      await refreshTemplates();
-      notifyTemplatesChanged();
-    } catch (err) {
-      reportError(err, { headline: "Couldn't delete template" });
-    } finally {
-      setSavingSlug(null);
-    }
-  }, [pendingDelete, notifyTemplatesChanged, refreshTemplates]);
-
-  const commitRestore = useCallback(async () => {
-    setPendingRestore(false);
-    setSavingSlug('__restore__');
-    try {
-      const refreshed = await api.restoreBuiltinPromptTemplates();
-      setTemplates(refreshed);
-      setDrafts(Object.fromEntries(refreshed.map(t => [t.slug, t.body])));
-      notifyTemplatesChanged();
-    } catch (err) {
-      reportError(err, { headline: "Couldn't restore built-in templates" });
-    } finally {
-      setSavingSlug(null);
-    }
-  }, [notifyTemplatesChanged]);
-
-  // Any submodal open (rename / delete / restore confirm) suppresses
-  // the page-level Escape close in SettingsView — Radix Dialog catches
-  // Escape first and dismisses just the modal, leaving the section
-  // pane mounted.
-  const subModalOpen = !!(adding || renaming || pendingDelete || pendingRestore);
-  useEffect(() => {
-    // BACI-248: bubble the submodal-open signal up so the SettingsView
-    // shell can suppress its own Escape-to-close listener while a
-    // child modal is mounted. We hang it off the parent via a custom
-    // event because the props that arrive here are App-owned; a callback
-    // prop is the cleaner door but adds another seam — the event keeps
-    // the parent shell ignorant of which section is mounted.
-    window.dispatchEvent(new CustomEvent('mk-settings-submodal', { detail: { open: subModalOpen } }));
-    return () => {
-      if (subModalOpen) {
-        window.dispatchEvent(new CustomEvent('mk-settings-submodal', { detail: { open: false } }));
-      }
-    };
-  }, [subModalOpen]);
+  const {
+    templates,
+    placeholders,
+    drafts,
+    savingSlug,
+    bacioVer,
+    adding,
+    setAdding,
+    renaming,
+    setRenaming,
+    pendingDelete,
+    setPendingDelete,
+    pendingRestore,
+    setPendingRestore,
+    setDraft,
+    saveTemplate,
+    saveConcurrency,
+    saveActionLabel,
+    commitAdd,
+    commitRename,
+    commitDelete,
+    commitRestore,
+  } = useTemplateManagement(onTemplatesChanged);
 
   // The Restore button is always available — the backend's
   // RestoreBuiltinPromptTemplates is idempotent (only inserts slugs that
@@ -530,186 +349,27 @@ export default function SystemSettingsSection({
         </div>
 
         {adding && (
-          <div className="mk-tmpl mk-tmpl-adding">
-            <div className="mk-tmpl-head">
-              <span className="mk-tmpl-label">New template</span>
-            </div>
-            <div className="mk-tmpl-add-grid">
-              <label className="mk-tmpl-add-field">
-                <span>Slug</span>
-                <input
-                  className="mk-tmpl-input"
-                  value={adding.slug}
-                  placeholder="e.g. spike"
-                  onChange={e => setAdding({ ...adding, slug: e.target.value })}
-                />
-              </label>
-              <label className="mk-tmpl-add-field">
-                <span>Name (gerund — used by the activity pill)</span>
-                <input
-                  className="mk-tmpl-input"
-                  value={adding.name}
-                  placeholder="e.g. Spiking"
-                  onChange={e => setAdding({ ...adding, name: e.target.value })}
-                />
-              </label>
-            </div>
-            {/*
-              BACI-67: action_label is the imperative override used by
-              the dispatch dropdown buttons (kanban card + issue
-              workspace shelf). When empty, the UI derives one from
-              Name via the gerund→imperative rule. Optional.
-            */}
-            <label className="mk-tmpl-add-field">
-              <span>Action label (optional · button text on dispatch dropdowns; empty derives from name)</span>
-              <input
-                className="mk-tmpl-input"
-                value={adding.actionLabel}
-                placeholder="e.g. Spike"
-                onChange={e => setAdding({ ...adding, actionLabel: e.target.value })}
-              />
-            </label>
-            <textarea
-              className="mk-tmpl-input"
-              value={adding.body}
-              rows={3}
-              placeholder="Body — supports {{issue_id}}, {{issue_title}}, {{repo_prefix}}"
-              onChange={e => setAdding({ ...adding, body: e.target.value })}
-            />
-            <div className="mk-tmpl-toolbar">
-              <button
-                className="mk-segmented-btn is-active"
-                onClick={commitAdd}
-                disabled={!adding.slug || !adding.name}
-              >
-                Create
-              </button>
-            </div>
-          </div>
+          <TemplateAddForm
+            draft={adding}
+            onChange={setAdding}
+            onCommit={commitAdd}
+          />
         )}
 
-        {templates.map(t => {
-          const draft = drafts[t.slug] ?? t.body;
-          const dirty = draft !== t.body;
-          const busy = savingSlug === t.slug;
-          return (
-            <div className="mk-tmpl" key={t.slug}>
-              <div className="mk-tmpl-head">
-                <span className="mk-tmpl-label">
-                  {t.label}
-                  {t.isBuiltin && <span className="mk-tmpl-builtin"> · built-in</span>}
-                  <span className="mk-tmpl-slug"> · <code>{t.slug}</code></span>
-                </span>
-                <div className="mk-tmpl-actions">
-                  {t.isBuiltin && (
-                    <Tooltip label="Restore the built-in default body">
-                      <button
-                        className="mk-tmpl-reset"
-                        disabled={busy || (t.isDefault && !dirty)}
-                        onClick={() => saveTemplate(t.slug, '')}
-                      >
-                        Reset body
-                      </button>
-                    </Tooltip>
-                  )}
-                  <button
-                    className="mk-tmpl-reset"
-                    disabled={busy}
-                    onClick={() => setRenaming({ slug: t.slug, newSlug: t.slug, newName: t.label })}
-                  >
-                    Rename
-                  </button>
-                  <button
-                    className="mk-tmpl-reset"
-                    disabled={busy}
-                    onClick={() => setPendingDelete(t.slug)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-              <textarea
-                className="mk-tmpl-input"
-                value={draft}
-                rows={3}
-                disabled={busy}
-                spellCheck={false}
-                onChange={e => setDrafts(prev => ({ ...prev, [t.slug]: e.target.value }))}
-                onBlur={() => { if (dirty) saveTemplate(t.slug, draft); }}
-              />
-              {/*
-                BACI-67: per-template action_label override. The
-                imperative form goes here; the gerund stays in
-                Name (visible above) and feeds the activity-pill
-                derivation on taken cards. Empty value clears the
-                override and the UI derives from Name.
-              */}
-              <div className="mk-tmpl-states">
-                <div className="mk-tmpl-states-head">
-                  <span className="mk-tmpl-states-label">
-                    Action label
-                    <span className="mk-tmpl-states-hint"> · imperative; rendered on dispatch dropdowns. Empty = derive from name.</span>
-                  </span>
-                  {t.isBuiltin && (
-                    <Tooltip label={t.defaultActionLabel ? `Reset to the built-in default ("${t.defaultActionLabel}")` : 'Clear the override'}>
-                      <button
-                        className="mk-tmpl-reset"
-                        disabled={busy || t.actionLabelIsDefault}
-                        onClick={() => saveActionLabel(t.slug, t.defaultActionLabel)}
-                      >
-                        Reset action label
-                      </button>
-                    </Tooltip>
-                  )}
-                </div>
-                <input
-                  type="text"
-                  className="mk-tmpl-input"
-                  defaultValue={t.actionLabel}
-                  key={`${t.slug}:action:${t.actionLabel}`}
-                  placeholder="e.g. Plan, Design, Implement (empty derives from name)"
-                  disabled={busy}
-                  onBlur={(e) => {
-                    const v = e.target.value;
-                    if (v !== t.actionLabel) saveActionLabel(t.slug, v);
-                  }}
-                />
-              </div>
-              <div className="mk-tmpl-states">
-                <div className="mk-tmpl-states-head">
-                  <span className="mk-tmpl-states-label">
-                    Concurrency limit
-                    <span className="mk-tmpl-states-hint"> · 0 = unlimited</span>
-                  </span>
-                  {t.isBuiltin && (
-                    <Tooltip label={`Reset to the built-in default (${t.defaultConcurrencyLimit})`}>
-                      <button
-                        className="mk-tmpl-reset"
-                        disabled={busy || t.concurrencyIsDefault}
-                        onClick={() => saveConcurrency(t.slug, t.defaultConcurrencyLimit)}
-                      >
-                        Reset limit
-                      </button>
-                    </Tooltip>
-                  )}
-                </div>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  className="mk-tmpl-input mk-tmpl-concurrency"
-                  defaultValue={t.concurrencyLimit}
-                  key={`${t.slug}:${t.concurrencyLimit}`}
-                  disabled={busy}
-                  onBlur={(e) => {
-                    const n = Math.max(0, parseInt(e.target.value, 10) || 0);
-                    if (n !== t.concurrencyLimit) saveConcurrency(t.slug, n);
-                  }}
-                />
-              </div>
-            </div>
-          );
-        })}
+        {templates.map(t => (
+          <TemplateRow
+            key={t.slug}
+            template={t}
+            draft={drafts[t.slug] ?? t.body}
+            busy={savingSlug === t.slug}
+            onDraftChange={setDraft}
+            onSaveBody={saveTemplate}
+            onSaveActionLabel={saveActionLabel}
+            onSaveConcurrency={saveConcurrency}
+            onRename={tpl => setRenaming({ slug: tpl.slug, newSlug: tpl.slug, newName: tpl.label })}
+            onDelete={setPendingDelete}
+          />
+        ))}
       </section>
 
       {/* About — read-only footer band. */}
@@ -725,7 +385,13 @@ export default function SystemSettingsSection({
         <div className="mk-settings-value"><code>{bacioVer || '—'}</code></div>
       </section>
 
-      <Modal open={!!renaming} onClose={() => setRenaming(null)} title="Rename template">
+      <ConfirmModal
+        open={!!renaming}
+        onClose={() => setRenaming(null)}
+        title="Rename template"
+        confirmLabel="Save"
+        onConfirm={commitRename}
+      >
         {renaming && (
           <>
             <label className="mk-tmpl-add-field">
@@ -744,42 +410,36 @@ export default function SystemSettingsSection({
                 onChange={e => setRenaming({ ...renaming, newName: e.target.value })}
               />
             </label>
-            <div className="mk-modal-actions">
-              <Modal.Close asChild>
-                <button className="mk-segmented-btn">Cancel</button>
-              </Modal.Close>
-              <button className="mk-segmented-btn is-active" onClick={commitRename}>Save</button>
-            </div>
           </>
         )}
-      </Modal>
+      </ConfirmModal>
 
-      <Modal open={!!pendingDelete} onClose={() => setPendingDelete(null)} title="Delete template">
+      <ConfirmModal
+        open={!!pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        title="Delete template"
+        confirmLabel="Delete"
+        onConfirm={commitDelete}
+      >
         <p>
           Delete the template <code>{pendingDelete}</code>? Historical dispatches
           that referenced this slug will keep it verbatim but won&apos;t have a body to
           render anymore.
         </p>
-        <div className="mk-modal-actions">
-          <Modal.Close asChild>
-            <button className="mk-segmented-btn">Cancel</button>
-          </Modal.Close>
-          <button className="mk-segmented-btn is-active" onClick={commitDelete}>Delete</button>
-        </div>
-      </Modal>
+      </ConfirmModal>
 
-      <Modal open={pendingRestore} onClose={() => setPendingRestore(false)} title="Restore built-in templates">
+      <ConfirmModal
+        open={pendingRestore}
+        onClose={() => setPendingRestore(false)}
+        title="Restore built-in templates"
+        confirmLabel="Restore"
+        onConfirm={commitRestore}
+      >
         <p>
           Re-seed any built-in template that&apos;s been deleted, from the
           embedded defaults. Existing templates won&apos;t be touched (idempotent).
         </p>
-        <div className="mk-modal-actions">
-          <Modal.Close asChild>
-            <button className="mk-segmented-btn">Cancel</button>
-          </Modal.Close>
-          <button className="mk-segmented-btn is-active" onClick={commitRestore}>Restore</button>
-        </div>
-      </Modal>
+      </ConfirmModal>
     </div>
   );
 }
