@@ -8,6 +8,7 @@ import QuestionModal from './QuestionModal';
 import SessionMessageButton from './SessionMessageButton';
 import { todoGlyph } from '../lib/todoGlyph';
 import * as api from '../api';
+import { useAgents } from '../state/AgentsProvider';
 
 // relTime renders a coarse "time since" for the last-seen line.
 function relTime(iso: string): string {
@@ -205,12 +206,10 @@ function mockAgents(): AgentCardDTO[] {
 // filtered out — once a session ends there's nothing actionable left on
 // it, and the history is visible via the History view if needed. Read-
 // only — agents are dispatched work from the issue drawer.
-type AgentsViewProps = {
-  agents: AgentCardDTO[];
-  onRefresh?: () => void;
-};
-
-export default function AgentsView({ agents, onRefresh }: AgentsViewProps) {
+// BACI-361: AgentsView self-sources the agents resource + refresh from
+// useAgents() rather than props.
+export default function AgentsView() {
+  const { agents, refreshAgents: onRefresh } = useAgents();
   // BACI-53 ask_user_question modal state. activeQuestionId is the
   // pending row's primary key (null when no modal is open); when set
   // the modal fetches the full payload + renders the answer form.

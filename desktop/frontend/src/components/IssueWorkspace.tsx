@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router';
-import type { BoardCard, IssueBriefDTO } from '../api';
 import MarkdownView from '../lib/markdownView';
 import Icon from './Icon';
 import IssueLockBanner from './issue/IssueLockBanner';
@@ -14,6 +13,9 @@ import PrAttachModal from './issue/PrAttachModal';
 import IssueTranscriptList from './issue/IssueTranscriptList';
 import { documentPath, featurePath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
+import { useActiveRepo } from '../state/RepoProvider';
+import { useCards } from '../state/CardsProvider';
+import { useOpenIssue } from '../state/useOpenIssue';
 
 // IssueWorkspace is the top-level per-issue screen — replaces the right-
 // side drawer + centred edit modal with one routed view. Primary column
@@ -21,48 +23,31 @@ import prLabel from '../lib/prLabel';
 // secondary rail carries feature/assignee/tags metadata, PR attachments,
 // and claimants.
 //
-// All data is in `brief` (an IssueBriefDTO) which the parent App loads
-// via api.getIssueBrief and polls every 10s while this view is mounted.
-// `brief === null` is the loading skeleton state — render the issue key
-// from `openIssueKey` so the head doesn't flash empty during the first
-// fetch.
-type IssueWorkspaceProps = {
-  activeBoard: string;
-  openIssueKey: string;
-  brief: IssueBriefDTO | null;
-  cards: BoardCard[];
-  onClose: () => void;
-  onSaveTitle: (title: string) => void | Promise<void>;
-  onSaveCustomerImpact: (customerImpact: string) => void | Promise<void>;
-  onSaveDescription: (description: string) => void | Promise<void>;
-  onAddComment: (
-    author: string,
-    body: string,
-    opts?: { eval?: boolean; transcriptEventRef?: string },
-  ) => void | Promise<void>;
-  onDeleteComment: (commentUUID: string) => void | Promise<void>;
-  onCancelWaiting: () => void;
-  onAttachPR: (url: string) => void | Promise<void>;
-  onNavigateIssue: (key: string) => void;
-  onDescEditingChange: (editing: boolean) => void;
-};
-
-export default function IssueWorkspace({
-  activeBoard,
-  openIssueKey,
-  brief,
-  cards,
-  onClose,
-  onSaveTitle,
-  onSaveCustomerImpact,
-  onSaveDescription,
-  onAddComment,
-  onDeleteComment,
-  onCancelWaiting,
-  onAttachPR,
-  onNavigateIssue,
-  onDescEditingChange,
-}: IssueWorkspaceProps) {
+// BACI-361: the workspace is a propless route element. All data is in
+// `brief` (an IssueBriefDTO) which the route-scoped useOpenIssue() hook loads
+// via api.getIssueBrief and polls every 10s while this view is mounted —
+// tearing down automatically on close / repo-change. `brief === null` is the
+// loading skeleton state — render the issue key from `openIssueKey` so the
+// head doesn't flash empty during the first fetch. The active repo + the
+// close / prev-next navigation come from useActiveRepo(); the cached board
+// cards (prev/next siblings) and the cancel-waiting handler from useCards().
+export default function IssueWorkspace() {
+  const { activeBoard, closeIssue: onClose, openIssue: onNavigateIssue } = useActiveRepo();
+  const { cards, cancelWaitingFromCard } = useCards();
+  const {
+    openIssueKey,
+    brief,
+    setDescEditing: onDescEditingChange,
+    saveTitle: onSaveTitle,
+    saveCustomerImpact: onSaveCustomerImpact,
+    saveDescription: onSaveDescription,
+    addComment: onAddComment,
+    deleteComment: onDeleteComment,
+    attachPR: onAttachPR,
+  } = useOpenIssue();
+  // BACI-255: cancel the open issue's queued/pending dispatch — the lock
+  // banner's spinner-as-cancel affordance.
+  const onCancelWaiting = () => cancelWaitingFromCard(openIssueKey);
   // PR attach is behind a modal (BACI-339) — the rail shows a compact
   // "+ Attach PR" button that opens it, so the URL field doesn't occupy
   // rail space unless the user wants to attach.
