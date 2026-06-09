@@ -7,7 +7,7 @@
 // reshapes are unit testable — see ./issue.ts for the pattern + the
 // Phase 2b note.
 
-import type { DocSummary, DocContent } from '../../api.http';
+import type { DocSummary, DocContent } from '../contract';
 
 // ApiDocumentLink is the raw wire shape for one document_link row
 // returned alongside a doc in the list response. Field naming follows

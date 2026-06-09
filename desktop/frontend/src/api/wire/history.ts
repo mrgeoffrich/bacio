@@ -6,7 +6,7 @@
 // paging logic stays in api.http.ts's listHistory — only the per-row
 // reshape moves here. See ./issue.ts for the pattern + the Phase 2b note.
 
-import type { HistoryEntryDTO } from '../../api.http';
+import type { HistoryEntryDTO } from '../contract';
 
 export interface ApiHistoryEntry {
   id: number;

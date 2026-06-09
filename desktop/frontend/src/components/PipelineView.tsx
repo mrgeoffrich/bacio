@@ -11,12 +11,13 @@ import prLabel from '../lib/prLabel';
 import { stageLabel, stageGlyph, isShipStage, isShelveStage, isMarkDoneStage } from '../lib/pipelineProcesses';
 import { blockedByMode } from '../lib/blockedByBadge';
 import * as api from '../api';
-import type { BoardCard, ProcessSelection } from '../api';
 import type {
+  BoardCard,
+  ProcessSelection,
   BoardCardBlocker,
   BoardCardJob,
   BoardCardQuestion,
-} from '../../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
+} from '../api';
 
 // blockKind classifies a card while a drag-to-block gesture is in flight:
 // 'target' (a valid drop), 'source' (self-drop no-op), 'dup' (already
