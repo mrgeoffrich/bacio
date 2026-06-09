@@ -16,7 +16,7 @@ import type {
   UnsyncedProject,
   SyncSetupDTO,
   RepoLinkResult,
-} from '../../api.http';
+} from '../contract';
 
 // SyncStatusApi mirrors api.SyncStatusOut — the wire shape of the
 // BACI-89 GET /sync endpoint.

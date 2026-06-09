@@ -5,9 +5,10 @@
 // functions that reshape them into the camelCase desktop DTOs the React
 // tree consumes. Moved out of api.http.ts so the reshapes are unit
 // testable; api.http.ts imports the types (for its `call<T>` generics)
-// and the reshapers (for the fetch wrappers). Phase 2b (BACI-359) folds
-// the DTO shapes into a shared contract — for now they're imported, as
-// types only, from api.http.ts so this is a behaviour-preserving move.
+// and the reshapers (for the fetch wrappers). Phase 2b (BACI-359) folded
+// the camelCase DTO shapes into the shared, runtime-free ../contract
+// module — imported as types only, so both transports compile against
+// one definition.
 
 import type {
   BoardCard,
@@ -19,7 +20,7 @@ import type {
   FeatureRefDTO,
   RelationDTO,
   WaitingState,
-} from '../../api.http';
+} from '../contract';
 import { stateLabel, assigneeList } from './common';
 
 export interface ApiIssue {
