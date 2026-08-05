@@ -41,14 +41,24 @@ func stateLabel(s model.State) string {
 // (BACI-89) drive the topbar's live sync-status badge: SyncEnabled is
 // "this repo has git sync configured"; the other three reflect the
 // background sync runner's last / current state.
+//
+// Two further fields (BACI-376) are what let the badge stop lying:
+// SyncBackgroundEnabled is the *global* sync.background_enabled toggle,
+// repeated on every board — a repo can be fully configured and still not
+// be mirrored because the ticker is off app-wide. SyncMirroredBy is the
+// sync repo already carrying this repo's exported data, which (because
+// the export is whole-DB) is routinely set for repos that have no sync
+// config of their own.
 type Board struct {
-	Prefix         string     `json:"prefix"`
-	Name           string     `json:"name"`
-	IssueCount     int        `json:"issueCount"`
-	SyncEnabled    bool       `json:"syncEnabled"`
-	SyncInProgress bool       `json:"syncInProgress"`
-	SyncLastAt     *time.Time `json:"syncLastAt,omitempty"`
-	SyncLastError  string     `json:"syncLastError,omitempty"`
+	Prefix                string     `json:"prefix"`
+	Name                  string     `json:"name"`
+	IssueCount            int        `json:"issueCount"`
+	SyncEnabled           bool       `json:"syncEnabled"`
+	SyncBackgroundEnabled bool       `json:"syncBackgroundEnabled"`
+	SyncMirroredBy        string     `json:"syncMirroredBy,omitempty"`
+	SyncInProgress        bool       `json:"syncInProgress"`
+	SyncLastAt            *time.Time `json:"syncLastAt,omitempty"`
+	SyncLastError         string     `json:"syncLastError,omitempty"`
 }
 
 // RepoActivity (BACI-369) is one repo's activity summary for the topbar
@@ -420,10 +430,12 @@ func (b *BoardService) ListBoards() ([]Board, error) {
 // ListBoards and AddRepository stay in lockstep.
 func boardWithSync(r *model.Repo, issueCount int, st client.SyncStatus) Board {
 	bd := Board{
-		Prefix:      r.Prefix,
-		Name:        r.Name,
-		IssueCount:  issueCount,
-		SyncEnabled: st.Configured,
+		Prefix:                r.Prefix,
+		Name:                  r.Name,
+		IssueCount:            issueCount,
+		SyncEnabled:           st.Configured,
+		SyncBackgroundEnabled: st.BackgroundEnabled,
+		SyncMirroredBy:        st.MirroredBy,
 	}
 	bd.SyncInProgress = st.InProgress
 	bd.SyncLastAt = st.LastSyncAt

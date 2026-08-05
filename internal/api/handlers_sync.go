@@ -58,9 +58,17 @@ type SyncStatusOut struct {
 	Prefix string `json:"prefix"`
 	// Configured is true when the repo has a parseable
 	// .bacio/config.yaml with a sync.remote AND a resolvable
-	// sync_remotes row (a local clone). When false, every other field
-	// below is zero — the repo simply isn't set up for sync.
+	// sync_remotes row (a local clone) — i.e. this repo can itself
+	// drive a sync tick.
 	Configured bool `json:"configured"`
+	// MirroredBy (BACI-376) is the label of the sync repo whose local
+	// clone already carries this repo's exported data, or "" when
+	// nothing does. Because the export is whole-DB, a repo with no
+	// sync config of its own is still mirrored once any other repo on
+	// this machine drives a tick — so Configured alone under-reports
+	// what is actually being synced. When MirroredBy is set,
+	// LastSyncAt / LastError describe that sync repo's last run.
+	MirroredBy string `json:"mirrored_by,omitempty"`
 	// BackgroundEnabled mirrors the global sync.background_enabled
 	// toggle. It is repo-independent (one global flag) but echoed on
 	// every status so a single-repo client doesn't need a second call.
@@ -80,18 +88,29 @@ type SyncStatusOut struct {
 // syncStatusForRepo assembles a SyncStatusOut for one tracked repo. It
 // never errors on a not-set-up repo — it returns Configured:false. The
 // inProgress flag is supplied by the caller (read once from the leader
-// service per request).
-func syncStatusForRepo(s *store.Store, repo *model.Repo, bgEnabled, inProgress bool) SyncStatusOut {
+// service per request), as is the mirror-coverage map (read once per
+// request — see sync.MirrorCoverage).
+func syncStatusForRepo(s *store.Store, repo *model.Repo, bgEnabled, inProgress bool,
+	coverage map[string]bsync.MirrorSource) SyncStatusOut {
 	out := SyncStatusOut{
 		Prefix:            repo.Prefix,
 		BackgroundEnabled: bgEnabled,
+	}
+	// BACI-376: coverage is independent of this repo's own config — a
+	// phantom (path == "") or a never-configured project is mirrored
+	// all the same, so this runs before the config-file checks below.
+	if src, ok := coverage[repo.Prefix]; ok {
+		out.MirroredBy = src.Label
+		out.InProgress = inProgress
+		out.LastSyncAt = src.LastSyncAt
+		out.LastError = src.LastError
 	}
 	if repo.Path == "" {
 		return out
 	}
 	cfg, err := bsync.ReadProjectConfig(repo.Path)
 	if err != nil {
-		// ErrNoConfig or a broken config: not configured for sync.
+		// ErrNoConfig or a broken config: no sync config of its own.
 		return out
 	}
 	if cfg.Sync.Remote == "" {
@@ -100,7 +119,8 @@ func syncStatusForRepo(s *store.Store, repo *model.Repo, bgEnabled, inProgress b
 	rec, err := s.GetSyncRemote(cfg.Sync.Remote)
 	if err != nil {
 		// A config with a remote but no local clone on this machine —
-		// surface the remote but report not-configured (sync can't run).
+		// surface the remote but report not-configured (this repo can't
+		// drive a tick).
 		out.Remote = cfg.Sync.Remote
 		return out
 	}
@@ -133,7 +153,13 @@ func (d deps) handleSyncStatusGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	out := syncStatusForRepo(d.store, repo, bgEnabled, d.syncBackgroundInProgress())
+	coverage, err := bsync.MirrorCoverage(d.store)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	out := syncStatusForRepo(d.store, repo, bgEnabled, d.syncBackgroundInProgress(), coverage)
 	writeJSON(w, http.StatusOK, &out)
 }
 
@@ -150,10 +176,16 @@ func (d deps) handleSyncStatusList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
+	coverage, err := bsync.MirrorCoverage(d.store)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
 	inProgress := d.syncBackgroundInProgress()
 	out := make([]SyncStatusOut, 0, len(repos))
 	for _, repo := range repos {
-		out = append(out, syncStatusForRepo(d.store, repo, bgEnabled, inProgress))
+		out = append(out, syncStatusForRepo(d.store, repo, bgEnabled, inProgress, coverage))
 	}
 	writeJSON(w, http.StatusOK, out)
 }

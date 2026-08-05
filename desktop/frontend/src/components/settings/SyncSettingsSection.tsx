@@ -6,6 +6,7 @@ import { reportError } from '../../errors';
 import * as api from '../../api';
 import type { SyncRegistryDTO, SyncPreferencesDTO, MemberProjectDTO } from '../../api';
 import { useInterval, POLL_INTERVAL_MS } from '../../lib/hooks/useInterval';
+import { useActiveRepo } from '../../state/RepoProvider';
 
 // BACI-248: Sync Settings section — absorbed body of the old
 // standalone SyncView. Now mounts as one entry in the sectioned
@@ -37,6 +38,10 @@ function ScopeChip() {
 }
 
 export default function SyncSettingsSection() {
+  // BACI-376: used only to mark the active repo's row in the unsynced
+  // list — the badge routes here, so the row it's complaining about
+  // needs to be findable at a glance.
+  const { activeBoard } = useActiveRepo();
   const [registry, setRegistry] = useState<SyncRegistryDTO | null>(null);
   const [prefs, setPrefs] = useState<SyncPreferencesDTO | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -147,10 +152,18 @@ export default function SyncSettingsSection() {
             <ScopeChip />
           </div>
           <div className="mk-settings-hint">
-            When on, the leader-elected controller mirrors each configured
-            project&apos;s issues, features, and documents to its sync repo
-            every few minutes. Turn off to stop the background ticker
-            without touching the per-project sync configuration.
+            When on, the leader-elected controller mirrors your issues,
+            features, and documents to each configured sync repo every
+            few minutes. Turn off to stop the background ticker without
+            touching the per-project sync configuration.
+            {/* BACI-376: this toggle is app-wide, and so is the mirror
+                it drives — the export walks every repo in the database,
+                not just the ones with a sync remote. Both halves of
+                that surprised a user into filing the ticket. */}
+            {' '}The switch is app-wide, and so is the mirror: every
+            project in your bacio database is exported into each sync
+            repo below, not only the ones set up with a sync remote of
+            their own.
           </div>
         </div>
         <div className="mk-segmented" role="group" aria-label="Background sync">
@@ -208,9 +221,12 @@ export default function SyncSettingsSection() {
             <ScopeChip />
           </div>
           <div className="mk-settings-hint">
-            Project repos this machine tracks that don&apos;t yet have a sync
-            configuration. Set up sync to attach one to an existing sync
-            repo (or initialise a new one).
+            Project repos this machine tracks that have no sync remote of
+            their own. Their data is still mirrored into the sync repos
+            above — the export is all-or-nothing — but they can&apos;t
+            drive a sync run themselves, so nothing syncs at all until at
+            least one project is set up. Set up sync to attach one to an
+            existing sync repo (or initialise a new one).
           </div>
         </div>
         {!loaded ? (
@@ -222,9 +238,18 @@ export default function SyncSettingsSection() {
         ) : (
           <ul className="mk-sync-project-list">
             {unsynced.map(p => (
-              <li key={p.prefix} className="mk-sync-project-row">
+              <li
+                key={p.prefix}
+                className={`mk-sync-project-row${p.prefix === activeBoard ? ' is-current' : ''}`}
+              >
                 <span className="mk-sync-project-prefix">{p.prefix}</span>
                 <span className="mk-sync-project-name">{p.name}</span>
+                {/* BACI-376: a user who clicked the topbar's muted sync
+                    badge arrives here wanting to know why *their* repo
+                    reads as not set up. Point at its row. */}
+                {p.prefix === activeBoard && (
+                  <span className="mk-pill mk-sync-current-pill">Current repo</span>
+                )}
                 <code className="mk-sync-project-path">{p.path}</code>
                 <button
                   type="button"

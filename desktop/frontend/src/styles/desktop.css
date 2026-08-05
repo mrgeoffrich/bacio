@@ -94,7 +94,10 @@
    Refresh glyph; .is-error switches to the blocked (red) palette;
    .is-unconfigured stays in the neutral .mk-icbtn key (no tinted
    background) so the always-on affordance reads as quieter than the
-   three "live" states above. */
+   three "live" states above. BACI-376's .is-paused (repo configured,
+   global background sync off) sits between the two groups: the review
+   palette so it reads as a held state rather than a healthy one, but
+   dimmed and un-animated so it never gets mistaken for .is-syncing. */
 .mk-sync-btn.is-enabled {
   background: var(--status-done-bg);
   color: var(--status-done);
@@ -110,6 +113,15 @@
 .mk-sync-btn.is-error {
   background: var(--status-blocked-bg);
   color: var(--status-blocked);
+}
+.mk-sync-btn.is-paused {
+  background: color-mix(in srgb, var(--status-review-bg) 55%, transparent);
+  color: var(--status-review);
+  opacity: 0.75;
+}
+.mk-sync-btn.is-paused:hover {
+  background: var(--status-review-bg);
+  opacity: 1;
 }
 .mk-sync-btn.is-unconfigured:hover { background: var(--bg-4); color: var(--fg-1); }
 @keyframes mk-sync-spin {
@@ -3448,6 +3460,16 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   background: var(--bg-3);
 }
 .mk-sync-project-row.is-muted { opacity: 0.65; }
+/* BACI-376: the repo the user is currently looking at, called out so
+   the trip "muted sync badge → Sync settings" lands on the row that
+   explains it. An inset accent rather than a background swap so the
+   row still reads as one of the list. */
+.mk-sync-project-row.is-current {
+  box-shadow: inset 2px 0 0 var(--status-review);
+}
+.mk-pill.mk-sync-current-pill {
+  background: var(--status-review-bg); color: var(--status-review);
+}
 .mk-sync-project-prefix {
   font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
   min-width: 48px;
