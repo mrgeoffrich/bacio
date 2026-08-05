@@ -967,6 +967,10 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   flex: 1;
   overflow: auto;
   min-height: 0;
+  /* BACI-370: the scroll container paints its own background behind the
+     viewport at every scroll offset, on both axes — deliberately alongside
+     the editor wrapper's, not a duplicate to tidy away. */
+  background: var(--bg-2);
 }
 .mk-docs-error {
   padding: 8px 16px;

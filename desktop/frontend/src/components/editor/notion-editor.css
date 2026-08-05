@@ -6,7 +6,11 @@
 .notion-editor-wrapper {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* BACI-370: min-height, not height — inside a scroll container `height: 100%`
+     resolves against the visible pane, clamping the background box to one
+     pane-height while the content overflows past it (visible seam on scroll).
+     min-height floors at the pane and grows with the content. */
+  min-height: 100%;
   background: var(--bg-2);
 }
 
