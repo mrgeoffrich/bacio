@@ -7,6 +7,7 @@ import NotificationBell from './NotificationBell';
 import ShippedPopover from './ShippedPopover';
 import { WEB_MODE } from '../env';
 import { viewPath, viewFromPath } from '../lib/routes';
+import { syncBadgeState } from '../lib/syncBadge';
 import { useActiveRepo } from '../state/RepoProvider';
 import { useAgents } from '../state/AgentsProvider';
 import { useCards } from '../state/CardsProvider';
@@ -27,16 +28,6 @@ export const NAV = [
   { view: 'history', label: 'History' },
   { view: 'monitor', label: 'Monitor' },
 ];
-
-// formatSyncTime renders an ISO timestamp as a short local string for
-// the sync badge's hover tooltip. Falls back to the raw string if the
-// date can't be parsed.
-function formatSyncTime(iso: string) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
-}
 
 // BACI-361: the topbar reads its live data from the state hooks rather than
 // the ~18 props App used to drill in. Only the three shell-owned overlay
@@ -83,7 +74,6 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
   const issueMatch = location.pathname.match(/^\/[^/]+\/issues\/([^/]+)$/);
   const openIssueKey = issueMatch ? issueMatch[1] : null;
   const board = boards.find(b => b.prefix === activeBoard);
-  const syncEnabled = !!board?.syncEnabled;
   // BACI-89: live status indicator with idle / in-progress / failed
   // variants. BACI-108: always rendered (even unconfigured repos),
   // always clickable — a one-click route into the standalone Sync
@@ -91,34 +81,13 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
   // than a text pill — the Refresh glyph stays constant; the
   // surrounding chrome carries the state (pistachio when
   // idle-enabled, pulsing review while syncing, blocked-red on
-  // failure, muted when sync isn't configured yet), and the tooltip
-  // carries the per-state hover copy (last-synced time, in-progress
-  // hint, error detail).
-  const syncInProgress = !!board?.syncInProgress;
-  const syncLastError = board?.syncLastError || '';
-  const syncLastAt = board?.syncLastAt || '';
-  let syncBtnClass = 'mk-sync-btn';
-  let syncBtnLabel;
-  let syncBtnTooltip;
-  if (syncInProgress) {
-    syncBtnClass += ' is-syncing';
-    syncBtnLabel = 'Syncing…';
-    syncBtnTooltip = 'Background sync in progress · click to open Sync settings';
-  } else if (syncLastError) {
-    syncBtnClass += ' is-error';
-    syncBtnLabel = 'Sync failed';
-    syncBtnTooltip = `Last sync failed: ${syncLastError} · click to open Sync settings`;
-  } else if (syncEnabled) {
-    syncBtnClass += ' is-enabled';
-    syncBtnLabel = 'Sync enabled';
-    syncBtnTooltip = syncLastAt
-      ? `Last synced ${formatSyncTime(syncLastAt)} · click to open Sync settings`
-      : 'Background sync configured · click to open Sync settings';
-  } else {
-    syncBtnClass += ' is-unconfigured';
-    syncBtnLabel = 'Sync';
-    syncBtnTooltip = 'Sync not configured for this repo · click to open Sync settings';
-  }
+  // failure, amber-muted when configured-but-globally-paused, muted
+  // when sync isn't set up for this repo), and the tooltip carries the
+  // per-state hover copy. BACI-376 moved the variant + copy decision
+  // into lib/syncBadge so it can be unit-tested and so the global
+  // background-sync toggle stops being conflated with this repo's own
+  // sync configuration.
+  const syncBadge = syncBadgeState(board);
   const isLeader = leaderState?.amLeader ?? false;
   // BACI-74: small pills tucked into the Agents button when the active
   // repo has any non-ended sessions. Available = idle or active AND
@@ -211,11 +180,11 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
           onCountChange={onNotifCountChange}
           onOpenIssue={onOpenNotificationIssue}
         />
-        <Tooltip label={syncBtnTooltip}>
+        <Tooltip label={syncBadge.tooltip}>
           <button
             type="button"
-            className={syncBtnClass}
-            aria-label={syncBtnLabel}
+            className={`mk-sync-btn is-${syncBadge.variant}`}
+            aria-label={syncBadge.label}
             onClick={onOpenSync}
           >
             <Icon name="refresh" />
