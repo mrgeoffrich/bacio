@@ -173,6 +173,121 @@ func TestIssueCreateHappy(t *testing.T) {
 	assertHistoryOps(t, s, []string{"issue.create"})
 }
 
+// TestIssueCreateAutoRun covers the BACI-374 toggle on the REST surface.
+// Twin of TestCreateIssueAutoRun in internal/client — the two create
+// paths must agree on what the same payload does.
+func TestIssueCreateAutoRun(t *testing.T) {
+	t.Run("arms_the_full_chain", func(t *testing.T) {
+		ts, s := newTestAPI(t, api.Options{})
+		seedRepo(t, s)
+		resp, body := apiPost(t, ts.URL+"/repos/MINI/issues",
+			`{"title":"drive it","auto_run":true}`)
+		if resp.StatusCode != 201 {
+			t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+		}
+		// The 201 body must already read in_pipeline — the web composer's
+		// optimistic card takes its column straight off this state.
+		if !strings.Contains(string(body), `"state": "in_pipeline"`) {
+			t.Fatalf("expected in_pipeline in the create response: %s", body)
+		}
+		iss, err := s.GetIssueByKey("MINI", 1)
+		if err != nil {
+			t.Fatalf("get issue: %v", err)
+		}
+		if iss.EngineMode != model.EngineAuto {
+			t.Errorf("engine_mode = %q, want auto", iss.EngineMode)
+		}
+		assertAutoRunChain(t, s, iss.ID)
+		assertHistoryOps(t, s, []string{"issue.create", "issue.process"})
+	})
+
+	t.Run("defaults_off", func(t *testing.T) {
+		ts, s := newTestAPI(t, api.Options{})
+		seedRepo(t, s)
+		resp, body := apiPost(t, ts.URL+"/repos/MINI/issues", `{"title":"inert"}`)
+		if resp.StatusCode != 201 {
+			t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+		}
+		iss, err := s.GetIssueByKey("MINI", 1)
+		if err != nil {
+			t.Fatalf("get issue: %v", err)
+		}
+		if iss.State != model.StateTodo {
+			t.Errorf("state = %q, want todo", iss.State)
+		}
+		jobs, err := s.ListPipelineJobs(iss.ID)
+		if err != nil {
+			t.Fatalf("list jobs: %v", err)
+		}
+		if len(jobs) != 0 {
+			t.Errorf("chain length = %d, want 0", len(jobs))
+		}
+	})
+
+	t.Run("explicit_state_wins", func(t *testing.T) {
+		ts, s := newTestAPI(t, api.Options{})
+		seedRepo(t, s)
+		resp, body := apiPost(t, ts.URL+"/repos/MINI/issues",
+			`{"title":"already done","auto_run":true,"state":"done"}`)
+		if resp.StatusCode != 201 {
+			t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+		}
+		iss, err := s.GetIssueByKey("MINI", 1)
+		if err != nil {
+			t.Fatalf("get issue: %v", err)
+		}
+		if iss.State != model.StateDone {
+			t.Errorf("state = %q, want done", iss.State)
+		}
+		jobs, err := s.ListPipelineJobs(iss.ID)
+		if err != nil {
+			t.Fatalf("list jobs: %v", err)
+		}
+		if len(jobs) != 0 {
+			t.Errorf("chain length = %d, want 0", len(jobs))
+		}
+	})
+
+	t.Run("dry_run_projects_without_writing", func(t *testing.T) {
+		ts, s := newTestAPI(t, api.Options{})
+		seedRepo(t, s)
+		resp, body := apiPost(t, ts.URL+"/repos/MINI/issues?dry_run=true",
+			`{"title":"rehearse","auto_run":true}`)
+		if resp.StatusCode != 201 {
+			t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+		}
+		if !strings.Contains(string(body), `"state": "in_pipeline"`) {
+			t.Fatalf("expected the projection to read in_pipeline: %s", body)
+		}
+		assertHistoryOps(t, s, nil)
+	})
+}
+
+// assertAutoRunChain checks the materialised chain matches the BACI-374
+// auto-run preset: four pending jobs, ship last.
+func assertAutoRunChain(t *testing.T, s *store.Store, issueID int64) {
+	t.Helper()
+	jobs, err := s.ListPipelineJobs(issueID)
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	want := []string{
+		model.BuiltinTemplateScope, model.BuiltinTemplatePlan,
+		model.BuiltinTemplateImplement, model.ShipJobMode,
+	}
+	if len(jobs) != len(want) {
+		t.Fatalf("chain length = %d, want %d", len(jobs), len(want))
+	}
+	for i, j := range jobs {
+		if j.Mode != want[i] {
+			t.Errorf("job %d mode = %q, want %q", i, j.Mode, want[i])
+		}
+		if j.Status != model.JobPending {
+			t.Errorf("job %d status = %s, want pending", i, j.Status)
+		}
+	}
+}
+
 func TestIssueCreateDryRunQuery(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)

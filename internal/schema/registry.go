@@ -32,7 +32,7 @@ func typeOf[T any]() reflect.Type { return reflect.TypeOf((*T)(nil)).Elem() }
 // schema and the cobra command stay aligned because both consume the same
 // inputs.*Input struct.
 var Registry = []Entry{
-	{"issue.add", "Create an issue in the current repo.", typeOf[inputs.IssueAddInput](), inputs.ExampleIssueAdd},
+	{"issue.add", "Create an issue in the current repo. Set `auto_run: true` (BACI-374) to have the new card start running the full Scope → Plan → Implement → Ship chain immediately — it lands in_pipeline with that chain and engine Auto on, no manual start needed. Defaults to false here (an inert Backlog card) so scripted / agent-driven creates don't fire a pipeline per ticket; the UI composers default it on. An explicit `state` other than in_pipeline wins and turns it off.", typeOf[inputs.IssueAddInput](), inputs.ExampleIssueAdd},
 	{"issue.edit", "Update an issue's title, description, feature, base branch, or customer impact.", typeOf[inputs.IssueEditInput](), inputs.ExampleIssueEdit},
 	{"issue.state", "Set an issue's state.", typeOf[inputs.IssueStateInput](), inputs.ExampleIssueState},
 	{"issue.assign", "Assign an issue to a person or agent.", typeOf[inputs.IssueAssignInput](), inputs.ExampleIssueAssign},

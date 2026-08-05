@@ -165,6 +165,24 @@ func TestProcessBySlugScopeShelve(t *testing.T) {
 	}
 }
 
+// TestProcessBySlugScopePlanImplementShip: the BACI-374 auto-run preset
+// resolves to the full four-stage chain, ship last.
+func TestProcessBySlugScopePlanImplementShip(t *testing.T) {
+	p, err := ProcessBySlug("scope-plan-implement-ship")
+	if err != nil {
+		t.Fatalf("ProcessBySlug(scope-plan-implement-ship): %v", err)
+	}
+	want := []string{BuiltinTemplateScope, BuiltinTemplatePlan, BuiltinTemplateImplement, ShipJobMode}
+	if len(p.Stages) != len(want) {
+		t.Fatalf("Stages = %v, want %v", p.Stages, want)
+	}
+	for i, s := range want {
+		if p.Stages[i] != s {
+			t.Fatalf("Stages[%d] = %q, want %q", i, p.Stages[i], s)
+		}
+	}
+}
+
 // TestProcessFromStagesWithPrefix covers the BACI-294 edit-path
 // constructor: it validates the combined locked-prefix + edited-tail
 // chain (no duplicate rule, ship-last across the whole chain) and returns

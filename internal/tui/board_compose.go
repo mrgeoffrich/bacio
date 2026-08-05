@@ -32,6 +32,13 @@ type composeOverlay struct {
 	ta         textarea.Model
 	err        error
 	submitting bool
+	// autoRun (BACI-374) mirrors the desktop composer's switch: on by
+	// default, it hands the new card to the engine on the full
+	// Scope → Plan → Implement → Ship chain. ctrl+r toggles it; off gives
+	// today's inert Backlog card. ctrl+r rather than the more obvious
+	// ctrl+a because bubbles/textarea binds ctrl+a to LineStart, and an
+	// overlay key must not shadow the editor's own readline bindings.
+	autoRun bool
 }
 
 // composeTitleMaxCells is the cap on the synthesised title, measured in
@@ -64,15 +71,16 @@ func (b *boardView) openComposeOverlay() tea.Cmd {
 	ta.MaxHeight = 0
 	ta.SetWidth(composeOverlayInnerWidth)
 	ta.SetHeight(composeOverlayHeight)
-	b.composeOverlay = &composeOverlay{ta: ta}
+	b.composeOverlay = &composeOverlay{ta: ta, autoRun: true}
 	return b.composeOverlay.ta.Focus()
 }
 
 // Update routes keystrokes while the composer is open. ctrl+s submits,
-// esc closes without a write; every other key forwards to the textarea
-// so enter inserts a newline and q / 1-9 are typed literally. While
-// submitting (the create + dispatch pair is mid-flight) ctrl+s and esc
-// are swallowed so a double-press can't fire a second create.
+// ctrl+r toggles auto-run, esc closes without a write; every other key
+// forwards to the textarea so enter inserts a newline and q / 1-9 are
+// typed literally. While submitting (the create + dispatch pair is
+// mid-flight) these keys are swallowed so a double-press can't fire a
+// second create.
 func (o *composeOverlay) Update(b *boardView, msg tea.Msg) tea.Cmd {
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -94,6 +102,9 @@ func (o *composeOverlay) Update(b *boardView, msg tea.Msg) tea.Cmd {
 	case "ctrl+s":
 		o.submit(b)
 		return nil
+	case "ctrl+r":
+		o.autoRun = !o.autoRun
+		return nil
 	}
 	var cmd tea.Cmd
 	o.ta, cmd = o.ta.Update(msg)
@@ -104,9 +115,10 @@ func (o *composeOverlay) Update(b *boardView, msg tea.Msg) tea.Cmd {
 // descriptions are a quiet no-op (the placeholder is the affordance, no
 // error message needed). Create-errors keep the overlay open with the
 // typed text intact so the user can correct and retry. BACI-300 retired
-// the auto-scope dispatch that used to fire here — triage now runs as a
-// Pipeline stage (drag the card into the Pipeline and pick Scope), so
-// the composer just creates the card and focuses it.
+// the auto-scope dispatch that used to fire here; BACI-374 replaced it
+// with the auto-run flag on the create payload — the server arms the
+// whole chain in one call, so the composer still makes exactly one write
+// and then focuses the new card.
 func (o *composeOverlay) submit(b *boardView) {
 	desc := strings.TrimSpace(o.ta.Value())
 	if desc == "" {
@@ -121,6 +133,7 @@ func (o *composeOverlay) submit(b *boardView) {
 	in := inputs.IssueAddInput{
 		Title:       titleFromDescription(desc),
 		Description: desc,
+		AutoRun:     o.autoRun,
 	}
 	iss, err := c.CreateIssue(context.Background(), b.repo, in, false)
 	if err != nil {
@@ -170,7 +183,13 @@ func (o *composeOverlay) View(innerWidth int) string {
 	if o.err != nil {
 		lines = append(lines, "", errorStyle.Render(truncate(o.err.Error(), contentWidth)))
 	}
-	footer := "ctrl+s create · esc cancel"
+	// BACI-374: the footer carries the auto-run state, and names the chain
+	// so leaving it on isn't a surprise — four agents run unattended.
+	autoState := "off"
+	if o.autoRun {
+		autoState = "on"
+	}
+	footer := "ctrl+s create · ctrl+r auto-run (Scope → Plan → Implement → Ship): " + autoState + " · esc cancel"
 	if o.submitting {
 		footer = "working…"
 	}

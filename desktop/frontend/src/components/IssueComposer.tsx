@@ -16,12 +16,18 @@ import { useActiveRepo } from '../state/RepoProvider';
 //   - create fails: the modal stays open with an inline error so the
 //     user can retry without losing their typed content.
 //
+// BACI-374 adds the auto-run switch: on by default, it hands the new card
+// straight to the engine on the full Scope → Plan → Implement → Ship
+// chain. Off gives today's behaviour — an inert card the operator drives
+// themselves.
+//
 // Props:
 //   - open: boolean controlling Modal open state.
 //   - onClose(): close handler (X / Cancel / Escape).
-//   - onCreated(newCard): fires on a successful create — Shell prepends the
-//     optimistic card, opens IssueWorkspace, and bumps the refresh poll. The
-//     composer itself is unaware of the routing.
+//   - onCreated(newCard, autoRan): fires on a successful create — Shell
+//     prepends the optimistic card and routes on `autoRan` (Pipeline when
+//     the card is already running, the workspace otherwise). The composer
+//     itself is unaware of the routing.
 //
 // BACI-361: the active repo prefix is read from useActiveRepo() rather than
 // prop-drilled (the composer is hidden when "all" is active, but it still
@@ -29,7 +35,7 @@ import { useActiveRepo } from '../state/RepoProvider';
 type IssueComposerProps = {
   open: boolean;
   onClose: () => void;
-  onCreated: (newCard: BoardCard) => void;
+  onCreated: (newCard: BoardCard, autoRan: boolean) => void;
 };
 
 export default function IssueComposer({ open, onClose, onCreated }: IssueComposerProps) {
@@ -46,6 +52,9 @@ export default function IssueComposer({ open, onClose, onCreated }: IssueCompose
   // with no features / no default stays creatable.
   const [features, setFeatures] = useState<FeatureSummary[]>([]);
   const [featureSlug, setFeatureSlug] = useState('');
+  // BACI-374: auto-run defaults on and resets to on every open — "defaults
+  // to on" is per-issue, not a remembered preference.
+  const [autoRun, setAutoRun] = useState(true);
 
   // Autofocus the description on open — title is optional per the
   // design (the worker derives one from the description when empty),
@@ -56,6 +65,7 @@ export default function IssueComposer({ open, onClose, onCreated }: IssueCompose
       setDescription('');
       setError('');
       setInFlight(false);
+      setAutoRun(true);
       // requestAnimationFrame so the textarea exists in the DOM by the
       // time we reach for it (Radix Dialog mounts on the next tick).
       requestAnimationFrame(() => {
@@ -102,7 +112,7 @@ export default function IssueComposer({ open, onClose, onCreated }: IssueCompose
     setInFlight(true);
     let newCard;
     try {
-      newCard = await api.addIssue(repoPrefix, effectiveTitle, trimmedDesc, featureSlug);
+      newCard = await api.addIssue(repoPrefix, effectiveTitle, trimmedDesc, featureSlug, autoRun);
     } catch (err) {
       // Leave the modal open with an inline error so the user can
       // retry without losing their content. addIssue throws an Error
@@ -111,10 +121,11 @@ export default function IssueComposer({ open, onClose, onCreated }: IssueCompose
       setInFlight(false);
       return;
     }
-    // Create succeeded — close + route into the new card's workspace.
-    onCreated?.(newCard);
+    // Create succeeded — close + let the shell route on whether the card
+    // is already running under the engine.
+    onCreated?.(newCard, autoRun);
     onClose?.();
-  }, [description, title, repoPrefix, featureSlug, onCreated, onClose]);
+  }, [description, title, repoPrefix, featureSlug, autoRun, onCreated, onClose]);
 
   const disabled = !description.trim() || inFlight;
 
@@ -165,6 +176,27 @@ export default function IssueComposer({ open, onClose, onCreated }: IssueCompose
             ))}
           </select>
         </label>
+        {/* BACI-374: auto-run. The label names all four stages on purpose —
+            leaving this on means four agents run unattended and the card can
+            end in a PR, so the consequence has to be legible at the click. */}
+        <div className="mk-settings-row mk-issue-composer-autorun">
+          <label className="mk-pl-toggle">
+            <span className="mk-settings-label">Auto-run · Scope → Plan → Implement → Ship</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoRun}
+              className={`mk-pl-switch${autoRun ? ' is-on' : ''}`}
+              onClick={() => setAutoRun(v => !v)}
+              disabled={inFlight}
+            />
+          </label>
+          <p className="mk-settings-hint">
+            {autoRun
+              ? 'The card goes straight into the Pipeline and runs all four stages unattended.'
+              : 'The card lands in the Backlog for you to drive yourself.'}
+          </p>
+        </div>
         {error && (
           <p className="mk-settings-hint mk-issue-composer-error" role="alert">
             {error}

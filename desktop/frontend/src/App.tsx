@@ -101,17 +101,26 @@ function Shell() {
     prevSettingsOpen.current = settingsOpen;
   }, [settingsOpen, refreshPromptConfig]);
 
-  // BACI-166 / BACI-332: composer success handler — optimistically prepend the
-  // new card, then branch on the view it was created from. From the Pipeline
-  // screen, auto-scope it (pipe + Scope job on Auto via the scope-shelve
-  // chain) and route to the Pipeline; off the Pipeline, route into the new
-  // card's workspace. On a mid-chain failure the steps before it already
-  // persisted and the refresh leaves a coherent partial state.
-  const onComposerCreated = useCallback(async (newCard: BoardCard) => {
+  // BACI-166 / BACI-332 / BACI-374: composer success handler — optimistically
+  // prepend the new card, then route. With auto-run on (the composer default)
+  // the server already armed the card in one call, so there is nothing to do
+  // but route to the Pipeline, where its progress renders — from any view,
+  // because that is genuinely where the card now lives. With auto-run off we
+  // keep the pre-existing behaviour verbatim: from the Pipeline screen,
+  // auto-scope it (pipe + Scope job on Auto via the scope-shelve chain) and
+  // route to the Pipeline; off the Pipeline, route into the new card's
+  // workspace. On a mid-chain failure of that older sequence the steps before
+  // it already persisted and the refresh leaves a coherent partial state.
+  const onComposerCreated = useCallback(async (newCard: BoardCard, autoRan: boolean) => {
     if (!newCard || !newCard.key) return;
     setCards(cs => [{ ...newCard }, ...cs]);
     setSettingsOpen(false);
     setSettingsInitialSection(null);
+    if (autoRan) {
+      refreshCards({ silent: true });
+      navigate(viewPath(activeBoard, 'pipeline'));
+      return;
+    }
     if (activeView === 'pipeline') {
       try {
         await api.setIssueState(activeBoard, newCard.key, 'in_pipeline');

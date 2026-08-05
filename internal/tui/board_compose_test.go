@@ -44,8 +44,12 @@ func typeRunes(b *boardView, s string) {
 
 // TestBoardCompose_HappyPath is the headline regression: N opens the
 // composer, the typed text is captured in the textarea, ctrl+s creates
-// a new issue (no auto-scope dispatch since BACI-300), the overlay
-// closes, and the cursor lands on the new card.
+// a new issue (no auto-scope dispatch since BACI-300), and the overlay
+// closes. BACI-374 made auto-run the composer default, so the card lands
+// in_pipeline with the full chain armed — see
+// TestBoardCompose_AutoRunOff for the opt-out path, which is where the
+// cursor-lands-on-the-new-card assertion now lives (the TUI kanban
+// deliberately has no Pipeline column, so an armed card is off-board).
 func TestBoardCompose_HappyPath(t *testing.T) {
 	s, repo, board := composeTestBoard(t)
 
@@ -95,18 +99,88 @@ func TestBoardCompose_HappyPath(t *testing.T) {
 	if full.Title != titleFromDescription(desc) {
 		t.Errorf("title = %q, want %q", full.Title, titleFromDescription(desc))
 	}
-	if full.State != model.StateTodo {
-		t.Errorf("state = %s, want %s", full.State, model.StateTodo)
+	// BACI-374: auto-run is the composer default, so the card is armed.
+	if full.State != model.StateInPipeline {
+		t.Errorf("state = %s, want %s", full.State, model.StateInPipeline)
+	}
+	if full.EngineMode != model.EngineAuto {
+		t.Errorf("engine_mode = %s, want %s", full.EngineMode, model.EngineAuto)
+	}
+	jobs, err := s.ListPipelineJobs(full.ID)
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	wantModes := []string{
+		model.BuiltinTemplateScope, model.BuiltinTemplatePlan,
+		model.BuiltinTemplateImplement, model.ShipJobMode,
+	}
+	if len(jobs) != len(wantModes) {
+		t.Fatalf("chain length = %d, want %d", len(jobs), len(wantModes))
+	}
+	for i, j := range jobs {
+		if j.Mode != wantModes[i] {
+			t.Errorf("job %d mode = %q, want %q", i, j.Mode, wantModes[i])
+		}
 	}
 
 	// BACI-300: the composer no longer queues a scope dispatch — triage
-	// is a Pipeline stage now, so no dispatch row is written.
+	// is a Pipeline stage now, so no dispatch row is written. The armed
+	// chain is all-pending; the controller engine dispatches its head on
+	// a later tick, not here.
 	disps, err := s.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
 	if err != nil {
 		t.Fatalf("list dispatches: %v", err)
 	}
 	if len(disps) != 0 {
 		t.Fatalf("expected 0 dispatches (no auto-scope), got %d", len(disps))
+	}
+}
+
+// TestBoardCompose_AutoRunOff covers the BACI-374 opt-out: ctrl+r turns
+// the composer's auto-run off, and the create then behaves exactly as it
+// did before — an inert Backlog card with no chain, with the cursor
+// landing on it because it renders in the Todo column.
+func TestBoardCompose_AutoRunOff(t *testing.T) {
+	s, repo, board := composeTestBoard(t)
+
+	board.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("N")})
+	if board.composeOverlay == nil {
+		t.Fatal("expected N to open the compose overlay")
+	}
+	if !board.composeOverlay.autoRun {
+		t.Fatal("auto-run should default on")
+	}
+	board.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if board.composeOverlay.autoRun {
+		t.Fatal("ctrl+r should toggle auto-run off")
+	}
+
+	typeRunes(board, "a card I want to triage myself")
+	board.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if board.composeOverlay != nil {
+		t.Fatal("expected composer to close after ctrl+s")
+	}
+
+	issues, err := s.ListIssues(store.IssueFilter{RepoID: &repo.ID})
+	if err != nil {
+		t.Fatalf("list issues: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d", len(issues))
+	}
+	full, err := s.GetIssueByID(issues[0].ID)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if full.State != model.StateTodo {
+		t.Errorf("state = %s, want %s", full.State, model.StateTodo)
+	}
+	jobs, err := s.ListPipelineJobs(full.ID)
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Errorf("chain length = %d, want 0", len(jobs))
 	}
 
 	// Cursor should land on the new card after the reload.

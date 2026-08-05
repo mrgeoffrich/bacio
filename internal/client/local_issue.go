@@ -376,10 +376,32 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 	if err != nil {
 		return nil, err
 	}
+	// BACI-374: auto-run arms the new card to run the whole chain under
+	// the engine. An explicit state wins — a caller asking for `done`
+	// means it, so the toggle is silently dropped rather than fighting
+	// the state. An explicit `in_pipeline` isn't a contradiction, so it
+	// stays armed. Keep this predicate identical to the REST handler's
+	// (internal/api/handlers_issue.go) — the two surfaces must agree on
+	// what the same payload does.
+	autoRun := in.AutoRun && (in.State == "" || state == model.StateInPipeline)
+	var autoProc model.Process
+	if autoRun {
+		autoProc, err = model.ProcessBySlug(model.AutoRunProcessSlug)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if dryRun {
 		projectedSlug := in.FeatureSlug
 		if projectedSlug == "" && resolvedFeature != nil {
 			projectedSlug = resolvedFeature.Slug
+		}
+		projectedState := state
+		if autoRun {
+			// BACI-374: the projection is a *model.Issue, so the chain rows
+			// the real call would materialise aren't representable here —
+			// the armed state is the one visible signal that auto-run took.
+			projectedState = model.StateInPipeline
 		}
 		projected := &model.Issue{
 			RepoID:         repo.ID,
@@ -389,7 +411,7 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 			FeatureSlug:    projectedSlug,
 			Title:          in.Title,
 			Description:    in.Description,
-			State:          state,
+			State:          projectedState,
 			Tags:           cleanTags,
 			CustomerImpact: cleanImpact,
 		}
@@ -414,6 +436,20 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 		TargetID: &iss.ID, TargetLabel: iss.Key,
 		Details: iss.Title,
 	})
+	if autoRun {
+		if err := c.store.ArmIssuePipeline(iss.ID, autoProc); err != nil {
+			return nil, err
+		}
+		c.recordOp(model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Op: "issue.process", Kind: "issue",
+			TargetID: &iss.ID, TargetLabel: iss.Key,
+			Details: autoProc.Slug,
+		})
+		// Re-read so the caller sees the armed card (in_pipeline), not the
+		// pre-arm row — the composers render the returned issue's state.
+		return c.store.GetIssueByID(iss.ID)
+	}
 	return iss, nil
 }
 

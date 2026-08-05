@@ -22,6 +22,9 @@ type fakeBoardClient struct {
 	sessions   []*model.AgentSession
 	dispatches []*model.AgentDispatch
 	sessClaims map[string][]*model.AgentClaim // session id -> claims for ShowAgentSession
+	// lastCreateInput records the payload the last CreateIssue call was
+	// handed, so a test can assert what BoardService threaded through.
+	lastCreateInput inputs.IssueAddInput
 }
 
 func (f *fakeBoardClient) GetRepoByPrefix(context.Context, string) (*model.Repo, error) {
@@ -182,6 +185,7 @@ func (f *fakeBoardClient) ListHiddenFeatureSlugs(context.Context, *model.Repo) (
 // again) sees the freshly-created card. Mirrors the "the store would
 // have written this" semantics the real client.LocalImpl gives.
 func (f *fakeBoardClient) CreateIssue(_ context.Context, _ *model.Repo, in inputs.IssueAddInput, _ bool) (*model.Issue, error) {
+	f.lastCreateInput = in
 	state := model.StateTodo
 	if in.State != "" {
 		st, err := model.ParseState(in.State)
@@ -189,6 +193,11 @@ func (f *fakeBoardClient) CreateIssue(_ context.Context, _ *model.Repo, in input
 			return nil, err
 		}
 		state = st
+	}
+	// Mirror the real client's BACI-374 arming: an auto-run create returns
+	// the card already in_pipeline.
+	if in.AutoRun && (in.State == "" || state == model.StateInPipeline) {
+		state = model.StateInPipeline
 	}
 	iss := &model.Issue{
 		ID:          int64(len(f.issues)) + 1,
@@ -554,7 +563,7 @@ func TestBoardService_AddIssue(t *testing.T) {
 		issues: nil,
 	}, "")
 
-	card, err := svc.AddIssue("TEST", "Login broken on Safari", "500 on submit", "")
+	card, err := svc.AddIssue("TEST", "Login broken on Safari", "500 on submit", "", false)
 	if err != nil {
 		t.Fatalf("AddIssue: %v", err)
 	}
@@ -575,16 +584,36 @@ func TestBoardService_AddIssue(t *testing.T) {
 	}
 }
 
+// TestBoardService_AddIssueAutoRun covers the BACI-374 seam: the
+// composer's auto-run switch is threaded into the create payload, and the
+// returned card comes back in the Pipeline column so the optimistic
+// prepend lands it where the engine will drive it.
+func TestBoardService_AddIssueAutoRun(t *testing.T) {
+	fake := &fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}}
+	svc := NewBoardService(fake, "")
+
+	card, err := svc.AddIssue("TEST", "drive it", "", "", true)
+	if err != nil {
+		t.Fatalf("AddIssue: %v", err)
+	}
+	if !fake.lastCreateInput.AutoRun {
+		t.Error("AutoRun = false in the create payload, want it threaded through")
+	}
+	if card.Column != string(model.StateInPipeline) {
+		t.Errorf("Column = %q, want %q", card.Column, model.StateInPipeline)
+	}
+}
+
 // TestBoardService_AddIssueRejectsAllRepos — the composer always has a
 // real prefix in hand from activeBoard; the "all" pseudo-board has no
 // concept of "which repo do I create in", so AddIssue must reject empty
 // and "all" prefixes with a clear error.
 func TestBoardService_AddIssueRejectsAllRepos(t *testing.T) {
 	svc := NewBoardService(&fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}}, "")
-	if _, err := svc.AddIssue("", "t", "", ""); err == nil {
+	if _, err := svc.AddIssue("", "t", "", "", false); err == nil {
 		t.Error("AddIssue(\"\") = nil, want error (cross-repo not supported)")
 	}
-	if _, err := svc.AddIssue("all", "t", "", ""); err == nil {
+	if _, err := svc.AddIssue("all", "t", "", "", false); err == nil {
 		t.Error("AddIssue(\"all\") = nil, want error (cross-repo not supported)")
 	}
 }

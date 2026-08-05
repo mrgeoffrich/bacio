@@ -22,6 +22,16 @@ type IssueAddInput struct {
 	// first-class "no user-facing change" state — read surfaces fall back
 	// to the title. Authored at scope-time; single-line, title-capped.
 	CustomerImpact string `json:"customer_impact,omitempty"`
+	// AutoRun (BACI-374) arms the new issue to run the full
+	// Scope → Plan → Implement → Ship chain immediately: the card lands
+	// in_pipeline with that chain materialised and engine Auto on, so the
+	// controller drives it end-to-end with no human gate. Absent (the
+	// default on this API) = false = today's behaviour, an inert card in
+	// the Backlog — scripted and agent-driven creates must opt in rather
+	// than fire a pipeline per filed ticket. The UI composers (desktop /
+	// web / TUI) send true by default, with a per-issue toggle to opt out.
+	// An explicit `state` other than in_pipeline wins and turns this off.
+	AutoRun bool `json:"auto_run,omitempty"`
 }
 
 // IssueEditInput is the payload for `bacio issue edit --json`. Pointer fields
