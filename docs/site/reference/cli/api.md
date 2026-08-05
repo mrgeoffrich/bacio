@@ -27,6 +27,8 @@ bacio api --cors-origin http://localhost:5174   # opt in to cross-origin browser
 
 Plus all [global flags](/reference/cli/index#global-flags). Incoming requests carry their own actor via the `X-Actor` header (default `"api"`) — the local-side actor resolution (agent identity via `.bacio/agents.json`, fallback `"user"`) is for the CLI path only.
 
+Like [`bacio web`](/reference/cli/web), the server resolves the repo it was launched from on startup — registering it if bacio has never seen it — and serves it from `GET /launch-repo`, so a UI running against this server (e.g. the Vite dev loop) opens on that repo.
+
 Once running, point any client at the server — or set `BACIO_REMOTE` so other `bacio` calls go through the API instead of the local DB:
 
 ```bash

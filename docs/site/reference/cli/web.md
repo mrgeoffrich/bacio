@@ -32,7 +32,8 @@ Plus all [global flags](/reference/cli/index#global-flags). Incoming requests ca
 1. Opens the SQLite store the rest of bacio shares.
 2. Serves the same JSON API as `bacio api` — every route, every audit row, every dry-run header.
 3. Mounts the embedded React bundle at `/ui/`, with a `301` from `/ui` → `/ui/` so the SPA's base path resolves correctly.
-4. Polls `/healthz` every 100 ms for up to 5 s and launches the OS default browser (`open` on macOS, `xdg-open` on Linux, `rundll32` on Windows) at `http://<addr>/ui/` when it comes up.
+4. Resolves the repo it was launched from — the working tree containing the current directory — registering it with bacio if it's never been seen before, exactly as any other bacio command would. The UI opens on that repo instead of whichever one you last had selected; started outside a git repo, it falls back to the remembered pick.
+5. Polls `/healthz` every 100 ms for up to 5 s and launches the OS default browser (`open` on macOS, `xdg-open` on Linux, `rundll32` on Windows) when it comes up — at `http://<addr>/ui/<PREFIX>/pipeline` for the launch repo, or the bare `http://<addr>/ui/` when there wasn't one.
 
 Browser launch is best-effort — a failure logs a hint and the server keeps running. `--no-open` skips the launch entirely. When the embedded web bundle is absent (e.g. the binary was built with `./build.sh --skip-web`), `bacio web` prints a one-line hint and the browser launch is implicitly skipped — there's nothing meaningful to open.
 
