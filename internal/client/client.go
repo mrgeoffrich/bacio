@@ -158,6 +158,12 @@ type Client interface {
 	// string-matching. dryRun short-circuits before the upgrade and the
 	// config write and returns the projected result.
 	LinkPhantomRepo(ctx context.Context, prefix, path string, dryRun bool) (*RepoLinkResult, error)
+	// RepoActivities (BACI-369) returns the per-repo activity summary the
+	// topbar's repository picker orders itself by — when anything last
+	// happened in each repo, and how many agent jobs are running in it
+	// right now. Cross-repo and cheap enough to poll: one aggregate
+	// query, one row per repo, including repos with no activity at all.
+	RepoActivities(ctx context.Context) ([]RepoActivity, error)
 
 	// ----- Features -----
 	// ListFeatures returns the features in repo. Archived features
