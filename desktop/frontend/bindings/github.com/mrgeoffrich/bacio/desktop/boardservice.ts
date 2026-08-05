@@ -334,6 +334,19 @@ export function GetSessionQuestion(id: number): $CancellablePromise<model$0.Sess
 }
 
 /**
+ * LaunchRepo returns the prefix of the repo the app was launched from,
+ * or "" when there wasn't one. The React tree uses it as the
+ * highest-priority default when the URL carries no repo prefix
+ * (BACI-368) — the desktop half of the web's GET /launch-repo.
+ * 
+ * The error return is vestigial (there is nothing to fail) but keeps
+ * the generated binding a rejectable promise like its siblings.
+ */
+export function LaunchRepo(): $CancellablePromise<string> {
+    return $Call.ByID(868537162);
+}
+
+/**
  * ListAgents returns the agent sessions for one repo (or every repo when
  * repoPrefix is empty or "all"), each carrying its status, open claims,
  * and the dispatches aimed at it. SessionStart stubs that never

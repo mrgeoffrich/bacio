@@ -19,6 +19,17 @@ export async function listColumns(): Promise<BoardColumn[]> {
   }
 }
 
+// getLaunchRepo returns the prefix of the repo the app was launched from
+// (BACI-368), or '' when it wasn't started inside one. RepoProvider uses it
+// as the highest-priority default when the URL carries no prefix.
+export async function getLaunchRepo(): Promise<string> {
+  try {
+    return await BoardService.LaunchRepo();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
   try {
     return await BoardService.ListCards(repoPrefix);
