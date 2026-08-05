@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
@@ -25,6 +26,38 @@ func (d deps) handleReposList(w http.ResponseWriter, r *http.Request) {
 		repos = []*model.Repo{}
 	}
 	writeJSON(w, http.StatusOK, repos)
+}
+
+// RepoActivityOut is one row of `GET /repos/activity` (BACI-369) — the
+// per-repo activity summary the topbar's repository picker orders itself
+// by. Mirrors client.RepoActivity field-for-field; last_activity_at is
+// omitted for a repo nothing has happened in yet.
+type RepoActivityOut struct {
+	Prefix         string     `json:"prefix"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	ActiveJobs     int        `json:"active_jobs"`
+}
+
+// handleRepoActivityList serves the cross-repo activity summary. Cheap
+// enough for the picker to poll on the shared 10s cadence: one aggregate
+// query, one row per repo. Read-only — no dry-run, no schema entry, no
+// CLI verb (same class as GET /history).
+func (d deps) handleRepoActivityList(w http.ResponseWriter, r *http.Request) {
+	rows, err := d.store.ListRepoActivity()
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	out := make([]RepoActivityOut, 0, len(rows))
+	for _, a := range rows {
+		out = append(out, RepoActivityOut{
+			Prefix:         a.Prefix,
+			LastActivityAt: a.LastActivityAt,
+			ActiveJobs:     a.ActiveJobs,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (d deps) handleReposShow(w http.ResponseWriter, r *http.Request) {

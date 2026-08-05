@@ -37,6 +37,12 @@ func newRouter(d deps) http.Handler {
 
 	mux.HandleFunc("GET /repos", d.handleReposList)
 	mux.HandleFunc("POST /repos", d.handleReposCreate)
+	// BACI-369: cross-repo activity summary for the topbar picker's
+	// ordering. The "activity" literal is more specific than "{prefix}"
+	// so ServeMux disambiguates without a conflicting pattern, and a repo
+	// prefix is exactly 4 characters (store.ValidatePrefix) so the two
+	// can never collide on a real value either.
+	mux.HandleFunc("GET /repos/activity", d.handleRepoActivityList)
 	mux.HandleFunc("GET /repos/{prefix}", d.handleReposShow)
 	mux.HandleFunc("DELETE /repos/{prefix}", d.handleReposDelete)
 	mux.HandleFunc("POST /repos/{prefix}/link", d.handleRepoLink)
