@@ -56,11 +56,17 @@ export async function attachPullRequest(
 // lives at the store boundary; the server surfaces it as the standard
 // error envelope and call() throws an Error whose .message carries the
 // human-readable text the composer renders inline.
+// autoRun (BACI-374) arms the new card to run the full
+// Scope → Plan → Implement → Ship chain immediately; the 201 body then
+// already reads in_pipeline, so the reshaped card lands in the Pipeline
+// column with no flash through Backlog. Defaults to false — the REST
+// surface's own default — and the composer is what turns it on.
 export async function addIssue(
   repoPrefix: string,
   title: string,
   description: string,
   featureSlug = '',
+  autoRun = false,
 ): Promise<BoardCard> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('addIssue: a repo prefix is required (cross-repo pseudo-board has no target)');
@@ -68,8 +74,10 @@ export async function addIssue(
   // feature_slug (Phase 4): empty defers to the repo default feature at
   // the store boundary (ResolveCreateIssueFeatureID). The handler decodes
   // the full IssueAddInput, so the field rides straight through.
-  const body: { title: string; description: string; feature_slug?: string } = { title, description };
+  const body: { title: string; description: string; feature_slug?: string; auto_run?: boolean } =
+    { title, description };
   if (featureSlug) body.feature_slug = featureSlug;
+  if (autoRun) body.auto_run = true;
   const iss = await call<ApiIssue>(
     `/repos/${repoPrefix}/issues`,
     { method: 'POST', body },

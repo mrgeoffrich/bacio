@@ -3610,6 +3610,14 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-issue-composer-error {
   color: var(--status-blocked);
 }
+/* BACI-374 auto-run row: the switch reuses the Pipeline card's
+   .mk-pl-toggle / .mk-pl-switch pair, but .mk-settings-row lays its
+   children out in a row — stack the toggle above its explanatory hint
+   so the consequence reads underneath the control. */
+.mk-issue-composer-autorun {
+  flex-direction: column; align-items: flex-start; gap: 4px;
+}
+.mk-issue-composer-autorun .mk-pl-toggle { gap: 10px; }
 
 /* ============================================================
    Shipped popover (BACI-187) — topbar pill + anchored menu of

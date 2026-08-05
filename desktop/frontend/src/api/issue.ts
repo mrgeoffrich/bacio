@@ -44,14 +44,20 @@ export async function attachPullRequest(
 // queue the scope worker on the new issue. Mirrors dispatchIssue's
 // shape line-for-line; validation (empty title, control chars, etc.)
 // lives at the store boundary inside BoardService.AddIssue.
+// autoRun (BACI-374) arms the new card to run the full
+// Scope → Plan → Implement → Ship chain immediately; the returned card
+// then comes back in the Pipeline column. Defaults to false here so a
+// caller that doesn't opt in gets today's inert Backlog card — the
+// composer is the surface that defaults it on.
 export async function addIssue(
   repoPrefix: string,
   title: string,
   description: string,
   featureSlug = '',
+  autoRun = false,
 ): Promise<BoardCard> {
   try {
-    return await BoardService.AddIssue(repoPrefix, title, description, featureSlug);
+    return await BoardService.AddIssue(repoPrefix, title, description, featureSlug, autoRun);
   } catch (err) {
     throw normalize(err);
   }

@@ -64,9 +64,13 @@ export function AddComment(repoPrefix: string, key: string, author: string, body
  * feature at creation time. Empty defers to the repo default feature
  * (store.ResolveCreateIssueFeatureID) — features are mandatory, so the
  * composer always supplies one, but an empty string stays valid.
+ * autoRun (BACI-374) arms the new card to run the full
+ * Scope → Plan → Implement → Ship chain under the engine; the composer
+ * switch defaults it on, and the returned card comes back in the
+ * Pipeline column rather than Backlog.
  */
-export function AddIssue(repoPrefix: string, title: string, description: string, featureSlug: string): $CancellablePromise<$models.BoardCard> {
-    return $Call.ByID(2590773623, repoPrefix, title, description, featureSlug).then(($result: any) => {
+export function AddIssue(repoPrefix: string, title: string, description: string, featureSlug: string, autoRun: boolean): $CancellablePromise<$models.BoardCard> {
+    return $Call.ByID(2590773623, repoPrefix, title, description, featureSlug, autoRun).then(($result: any) => {
         return $$createType1($result);
     });
 }
