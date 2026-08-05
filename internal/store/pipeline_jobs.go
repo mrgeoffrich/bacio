@@ -328,6 +328,36 @@ func (s *Store) SetIssueEnginePauseReason(issueID int64, reason string) error {
 	return err
 }
 
+// ArmIssuePipeline puts a card into the Pipeline running under the engine:
+// it moves the issue to in_pipeline, materialises `process` as its job
+// chain, and arms engine Auto so the controller drives the chain on its
+// next tick. The composite exists so every create surface (BACI-374's
+// auto-run toggle) performs the three writes identically instead of
+// re-deriving the sequence client-side.
+//
+// The order is load-bearing and must stay state → chain → Auto. Each write
+// commits on its own (SetIssueProcess opens its own transaction), so a
+// concurrent engine tick can land between them; both windows are
+// deliberately inert. Between writes 1 and 2 the card is in_pipeline with
+// no jobs, and tickIssue returns early on an empty chain. Between writes 2
+// and 3 engine_mode is still "", which ParseEngineMode reads as off, so
+// the tick returns early again. Arming Auto first, or materialising the
+// chain before the state move, would open a window where the engine could
+// act on a half-built card.
+//
+// An error from any write is returned rather than logged-and-continued: a
+// card sitting in_pipeline with Auto on and no chain is a confusing dead
+// end, so the caller should surface the failure.
+func (s *Store) ArmIssuePipeline(issueID int64, process model.Process) error {
+	if err := s.SetIssueState(issueID, model.StateInPipeline); err != nil {
+		return err
+	}
+	if _, err := s.SetIssueProcess(issueID, process); err != nil {
+		return err
+	}
+	return s.SetIssueEngineMode(issueID, model.EngineAuto)
+}
+
 // cancelRunningPipelineJob abandons an issue's in-flight pipeline run:
 // it cancels the currently-running job and the dispatch it's running
 // against, turns engine Auto off, and clears the pause reason. A no-op on
