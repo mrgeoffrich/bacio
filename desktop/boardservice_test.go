@@ -744,3 +744,52 @@ func TestBoardService_LaunchRepo(t *testing.T) {
 		t.Fatalf("LaunchRepo = (%q, %v), want (%q, nil)", got, err, "")
 	}
 }
+
+// TestBoardWithSyncCarriesGlobalToggle pins BACI-376: per-repo sync
+// configuration and the app-wide background-sync toggle are two
+// independent bits on the Board, so the topbar badge can tell "this repo
+// isn't set up" apart from "set up, but the ticker is switched off".
+func TestBoardWithSyncCarriesGlobalToggle(t *testing.T) {
+	repo := &model.Repo{Prefix: "TEST", Name: "test"}
+
+	bd := boardWithSync(repo, 3, client.SyncStatus{Configured: true, BackgroundEnabled: false})
+	if !bd.SyncEnabled {
+		t.Fatal("SyncEnabled = false, want true (repo is configured)")
+	}
+	if bd.SyncBackgroundEnabled {
+		t.Fatal("SyncBackgroundEnabled = true, want false (global ticker off)")
+	}
+
+	bd = boardWithSync(repo, 3, client.SyncStatus{Configured: false, BackgroundEnabled: true})
+	if bd.SyncEnabled {
+		t.Fatal("SyncEnabled = true, want false (repo has no sync config)")
+	}
+	if !bd.SyncBackgroundEnabled {
+		t.Fatal("SyncBackgroundEnabled = false, want true (global ticker on)")
+	}
+}
+
+// TestBoardWithSyncCarriesMirroredBy pins the other half of BACI-376:
+// the whole-DB export means a repo with no sync config of its own is
+// still mirrored, and the badge can only say so if the label survives
+// the fold onto Board.
+func TestBoardWithSyncCarriesMirroredBy(t *testing.T) {
+	repo := &model.Repo{Prefix: "TEST", Name: "test"}
+
+	bd := boardWithSync(repo, 0, client.SyncStatus{
+		Configured:        false,
+		MirroredBy:        "team-sync",
+		BackgroundEnabled: true,
+	})
+	if bd.SyncEnabled {
+		t.Fatal("SyncEnabled = true, want false (no sync remote of its own)")
+	}
+	if bd.SyncMirroredBy != "team-sync" {
+		t.Fatalf("SyncMirroredBy = %q, want team-sync", bd.SyncMirroredBy)
+	}
+
+	bd = boardWithSync(repo, 0, client.SyncStatus{BackgroundEnabled: true})
+	if bd.SyncMirroredBy != "" {
+		t.Fatalf("SyncMirroredBy = %q, want empty (nothing mirrors it)", bd.SyncMirroredBy)
+	}
+}

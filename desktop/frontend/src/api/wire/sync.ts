@@ -23,6 +23,7 @@ import type {
 export interface SyncStatusApi {
   prefix: string;
   configured: boolean;
+  mirrored_by?: string;
   background_enabled: boolean;
   in_progress: boolean;
   last_sync_at?: string;
@@ -127,6 +128,8 @@ export function boardWithSync(
     name,
     issueCount,
     syncEnabled: sync?.configured ?? false,
+    syncBackgroundEnabled: sync?.background_enabled ?? false,
+    syncMirroredBy: sync?.mirrored_by,
     syncInProgress: sync?.in_progress ?? false,
     syncLastAt: sync?.last_sync_at,
     syncLastError: sync?.last_error,

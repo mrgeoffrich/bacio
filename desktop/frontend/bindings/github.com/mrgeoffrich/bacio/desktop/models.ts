@@ -106,12 +106,22 @@ export class AudioPreferencesDTO {
  * (BACI-89) drive the topbar's live sync-status badge: SyncEnabled is
  * "this repo has git sync configured"; the other three reflect the
  * background sync runner's last / current state.
+ * 
+ * Two further fields (BACI-376) are what let the badge stop lying:
+ * SyncBackgroundEnabled is the *global* sync.background_enabled toggle,
+ * repeated on every board — a repo can be fully configured and still not
+ * be mirrored because the ticker is off app-wide. SyncMirroredBy is the
+ * sync repo already carrying this repo's exported data, which (because
+ * the export is whole-DB) is routinely set for repos that have no sync
+ * config of their own.
  */
 export class Board {
     "prefix": string;
     "name": string;
     "issueCount": number;
     "syncEnabled": boolean;
+    "syncBackgroundEnabled": boolean;
+    "syncMirroredBy"?: string;
     "syncInProgress": boolean;
     "syncLastAt"?: time$0.Time | null;
     "syncLastError"?: string;
@@ -129,6 +139,9 @@ export class Board {
         }
         if (!("syncEnabled" in $$source)) {
             this["syncEnabled"] = false;
+        }
+        if (!("syncBackgroundEnabled" in $$source)) {
+            this["syncBackgroundEnabled"] = false;
         }
         if (!("syncInProgress" in $$source)) {
             this["syncInProgress"] = false;

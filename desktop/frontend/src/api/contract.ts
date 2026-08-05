@@ -33,7 +33,17 @@ export interface Board {
   // background sync runner last / current state. syncLastAt /
   // syncLastError are absent when the repo has never synced / the last
   // sync succeeded.
+  //
+  // BACI-376: syncBackgroundEnabled is the global sync.background_enabled
+  // toggle, echoed on every board. A repo with syncEnabled but
+  // !syncBackgroundEnabled is configured yet not being mirrored — the
+  // ticker is off app-wide. syncMirroredBy is the label of the sync repo
+  // already carrying this repo's data (the export is whole-DB, so this is
+  // set for plenty of repos that have no sync config of their own);
+  // absent when nothing mirrors it.
   syncEnabled: boolean;
+  syncBackgroundEnabled: boolean;
+  syncMirroredBy?: string;
   syncInProgress: boolean;
   syncLastAt?: string;
   syncLastError?: string;

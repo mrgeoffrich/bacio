@@ -11,6 +11,7 @@ function board(prefix: string): Board {
     name: prefix.toLowerCase(),
     issueCount: 0,
     syncEnabled: false,
+    syncBackgroundEnabled: false,
     syncInProgress: false,
   };
 }
