@@ -1,9 +1,12 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import type { Board } from '../api';
 import Modal from './Modal';
 import Icon from './Icon';
 import { WEB_MODE } from '../env';
 import { useActiveRepo } from '../state/RepoProvider';
+import { useRepoActivity } from '../state/useRepoActivity';
+import { activityByPrefix, rankRepos } from './repoPickerOrder';
+import { formatWhen } from '../lib/formatWhen';
 
 // Web-only Add-Repository modal state: the path/name/prefix the user is
 // typing. Null when the modal is closed.
@@ -20,10 +23,21 @@ type AddWebState = { path: string; name: string; prefix: string };
 //
 // BACI-361: reads the board list + active repo + pick/add helpers from
 // useActiveRepo() rather than props.
+//
+// BACI-369: rows are ordered by recent activity, with repos that have
+// agent jobs in flight floated to the top and badged with the running
+// count. The order is snapshotted when the menu opens so a poll tick
+// can't reshuffle rows under the user's cursor; the pills keep updating
+// live off the polled data.
 export default function RepoPicker() {
   const { boards, activeBoard, pickBoard: onPick, addRepository: onAddRepository } = useActiveRepo();
+  const { activity } = useRepoActivity();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  // Prefixes in the order the open menu is rendering them. Empty until
+  // the first open (and while closed) — the render falls back to
+  // `boards` as-is then.
+  const [order, setOrder] = useState<string[]>([]);
   // Web-only: { path, name, prefix } modal state. Null = closed.
   const [addingWeb, setAddingWeb] = useState<AddWebState | null>(null);
   const [addError, setAddError] = useState('');
@@ -61,11 +75,31 @@ export default function RepoPicker() {
     };
   }, [open, addingWeb]);
 
+  const byPrefix = useMemo(() => activityByPrefix(activity), [activity]);
+
+  // Freeze the ranked order at open time. A click handler is the honest
+  // place for "snapshot on open" — an effect would fight the deps lint
+  // and re-rank on every poll tick.
+  const toggleMenu = () => {
+    if (!open) setOrder(rankRepos(boards, byPrefix).map((b: Board) => b.prefix));
+    setOpen(o => !o);
+  };
+
+  // Render order: the frozen snapshot, with any repo added mid-session
+  // (absent from it) appended at the end. No snapshot yet = boards as-is.
+  const ordered = useMemo(() => {
+    if (order.length === 0) return boards;
+    const rank = new Map(order.map((p, i) => [p, i]));
+    return [...boards].sort((a: Board, b: Board) =>
+      (rank.get(a.prefix) ?? order.length) - (rank.get(b.prefix) ?? order.length));
+  }, [boards, order]);
+
+  // Filter after ordering so typing narrows the list without reshuffling it.
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? boards.filter((b: Board) =>
+    ? ordered.filter((b: Board) =>
         b.name.toLowerCase().includes(q) || b.prefix.toLowerCase().includes(q))
-    : boards;
+    : ordered;
 
   const pick = (prefix: string) => {
     onPick(prefix);
@@ -123,7 +157,7 @@ export default function RepoPicker() {
     <div className="mk-repo-picker" ref={rootRef}>
       <button
         className="mk-repo-picker-trigger"
-        onClick={() => setOpen(o => !o)}
+        onClick={toggleMenu}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -151,18 +185,31 @@ export default function RepoPicker() {
             {filtered.length === 0 ? (
               <div className="mk-repo-picker-empty">No matching repositories.</div>
             ) : (
-              filtered.map(b => (
-                <button
-                  key={b.prefix}
-                  className={`mk-repo-picker-item ${b.prefix === activeBoard ? 'is-active' : ''}`}
-                  onClick={() => pick(b.prefix)}
-                  role="option"
-                  aria-selected={b.prefix === activeBoard}
-                >
-                  <span className="mk-repo-picker-item-name">{b.name}</span>
-                  <span className="mk-repo-picker-item-prefix">{b.prefix}</span>
-                </button>
-              ))
+              filtered.map(b => {
+                const act = byPrefix.get(b.prefix);
+                const jobs = act?.activeJobs ?? 0;
+                return (
+                  <button
+                    key={b.prefix}
+                    className={`mk-repo-picker-item ${b.prefix === activeBoard ? 'is-active' : ''}`}
+                    onClick={() => pick(b.prefix)}
+                    role="option"
+                    aria-selected={b.prefix === activeBoard}
+                    title={act?.lastActivityAt ? `Last active ${formatWhen(act.lastActivityAt)}` : undefined}
+                  >
+                    <span className="mk-repo-picker-item-name">{b.name}</span>
+                    {jobs > 0 && (
+                      <span
+                        className="mk-pill mk-status-busy mk-repo-picker-item-jobs"
+                        aria-label={`${jobs} job${jobs === 1 ? '' : 's'} running`}
+                      >
+                        {jobs}
+                      </span>
+                    )}
+                    <span className="mk-repo-picker-item-prefix">{b.prefix}</span>
+                  </button>
+                );
+              })
             )}
           </div>
           <button
