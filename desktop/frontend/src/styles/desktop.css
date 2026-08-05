@@ -391,6 +391,21 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-settings-label { font-size: 14px; font-weight: 500; color: var(--fg-1); }
 .mk-settings-hint { font-size: 12px; color: var(--fg-3); margin-top: 2px; }
 
+/* BACI-375: the Ship sound row's live status line — why the ka-ching is
+   quiet (waiting on a click / autoplay-blocked / still loading) rather
+   than leaving a silent sound indistinguishable from a bug. */
+.mk-settings-status {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--fg-3); margin-top: 4px;
+}
+.mk-settings-status-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: var(--fg-3);
+}
+.mk-settings-status--ready .mk-settings-status-dot { background: var(--status-done); }
+.mk-settings-status--warn  .mk-settings-status-dot { background: var(--status-doing); }
+.mk-settings-status--error .mk-settings-status-dot { background: var(--status-blocked); }
+
 .mk-segmented {
   display: inline-flex; gap: 2px; padding: 2px; flex-shrink: 0;
   background: var(--bg-4); border: 1px solid var(--border-1);
