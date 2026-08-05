@@ -150,10 +150,18 @@ then judge the digest against both. Write one file per run to the cwd:
 comment-<dispatch_id>-<mode>.md
 ```
 
-with `## Blocker` / `## Major` / `## Nit` headings (use only the headings that
-apply). A clean run is reported clean — "followed the brief, no findings" — never
-padded with fabricated ones. The absence of findings is itself a valid outcome
-(a clean review, an edit-free ship).
+with `## Blocker` / `## Non-blocker` / `## Nit` headings (use only the headings
+that apply — the same three buckets `references/mode_expectations.md` uses).
+
+Report every real divergence you found and let the buckets carry the severity —
+don't pre-filter to "only the ones worth mentioning". Two things are not
+findings, though: a divergence you can't ground in a specific `msg_index`, and
+padding on a run that genuinely followed the brief. A clean run is reported
+clean — "followed the brief, no findings" — and that is a valid outcome (a
+clean review, an edit-free ship).
+
+Keep each finding to the claim, the evidence anchor, and one line on why it
+matters. These files are read at a glance next to the rollup, not studied.
 
 ## Step 5 — rollup
 

@@ -9,16 +9,11 @@ Gather background knowledge relevant to the issue — external docs, prior art, 
 
 ## Setup
 
-The claim is already covered by the preamble's "First moves" block — do not repeat it here.
-
-Run from inside the worktree (Claude Code already created it via `isolation: worktree` and will remove it when you finish — never run `git worktree add` / `remove` yourself):
+The preamble's "First moves" block already covered the claim and `bacio worktree init`. One read gets you the ticket:
 
 ```bash
-bacio worktree init                                  # claims an API port for this run
 bacio issue brief <issue_id> -o json                 # full ticket + context
 ```
-
-If you must run a `bacio` command from elsewhere, pass `--env <worktree>/environment-config.yaml`.
 
 ## Research workflow
 
@@ -126,6 +121,5 @@ Questions the research couldn't resolve. One bullet each. If none, write "None".
 - **Never commit code changes.** You may read files freely, but do not edit, stage, or commit anything in the worktree.
 - **Never link the research doc to its feature.** Always pass the issue key (`<issue_id>`) to `bacio doc link`. A feature link fans the doc out onto every sibling issue's brief.
 - **Never overwrite an existing research doc silently.** If `.documents[]` already contains a `type == "research"` doc for this issue, surface it and ask the user whether to supersede it or append a new one.
-- **State is the engine's, not yours.** The claim is a focus marker (it no longer moves the issue), and a Pipeline-stage release is claim-drop only — the card stays `in_pipeline`. Don't call `bacio issue state` mid-run.
 
 {{> _postamble}}
