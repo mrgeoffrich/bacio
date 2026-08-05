@@ -215,10 +215,33 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "customer_impact"})
 		return
 	}
+	// BACI-374: auto-run arms the new card to run the whole chain under the
+	// engine. An explicit state wins — the toggle is silently dropped
+	// rather than fighting it — except for an explicit in_pipeline, which
+	// isn't a contradiction. Keep this predicate identical to the local
+	// client's (internal/client/local_issue.go): the two surfaces must
+	// agree on what the same payload does.
+	autoRun := in.AutoRun && (in.State == "" || state == model.StateInPipeline)
+	var autoProc model.Process
+	if autoRun {
+		autoProc, err = model.ProcessBySlug(model.AutoRunProcessSlug)
+		if err != nil {
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+	}
 	if isDryRun(r) {
 		projectedSlug := in.FeatureSlug
 		if projectedSlug == "" && resolvedFeature != nil {
 			projectedSlug = resolvedFeature.Slug
+		}
+		projectedState := state
+		if autoRun {
+			// The projection is a *model.Issue, so the chain rows the real
+			// call would materialise aren't representable — the armed state
+			// is the one visible signal that auto-run took.
+			projectedState = model.StateInPipeline
 		}
 		projected := &model.Issue{
 			RepoID:         repo.ID,
@@ -228,7 +251,7 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 			FeatureSlug:    projectedSlug,
 			Title:          in.Title,
 			Description:    in.Description,
-			State:          state,
+			State:          projectedState,
 			Tags:           cleanTags,
 			CustomerImpact: cleanImpact,
 		}
@@ -258,6 +281,31 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		TargetID: &iss.ID, TargetLabel: iss.Key,
 		Details: iss.Title,
 	})
+	if autoRun {
+		if err := d.store.ArmIssuePipeline(iss.ID, autoProc); err != nil {
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Actor:    ActorFromContext(r.Context()),
+			Op:       "issue.process",
+			Kind:     "issue",
+			TargetID: &iss.ID, TargetLabel: iss.Key,
+			Details: autoProc.Slug,
+		})
+		// Re-read before responding: the web composer builds its optimistic
+		// card's column straight off this body's state, so returning the
+		// pre-arm row would flash the card into Backlog until the next poll.
+		armed, err := d.store.GetIssueByID(iss.ID)
+		if err != nil {
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+		iss = armed
+	}
 	writeJSON(w, http.StatusCreated, iss)
 }
 

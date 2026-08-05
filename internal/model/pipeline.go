@@ -195,6 +195,11 @@ type Process struct {
 	Stages []string `json:"stages"`
 }
 
+// AutoRunProcessSlug names the preset the BACI-374 auto-run toggle arms on
+// a freshly-created issue. Both create surfaces (the local client and the
+// REST handler) resolve it through this constant so they can't drift.
+const AutoRunProcessSlug = "scope-plan-implement-ship"
+
 // pipelineProcesses is the starter set of processes (§5.1), in menu
 // order. New presets are added here; nothing else changes. The slug
 // path is retained for CLI ergonomics / back-compat — the desktop
@@ -224,7 +229,7 @@ var pipelineProcesses = []Process{
 	// by the auto-run toggle on the New Issue composers — carry a brand-new
 	// card the whole way from triage to the Shipping hand-off with no human
 	// gate in between.
-	{Slug: "scope-plan-implement-ship", Name: "Scope → Plan → Implement → Ship", Stages: []string{BuiltinTemplateScope, BuiltinTemplatePlan, BuiltinTemplateImplement, ShipJobMode}},
+	{Slug: AutoRunProcessSlug, Name: "Scope → Plan → Implement → Ship", Stages: []string{BuiltinTemplateScope, BuiltinTemplatePlan, BuiltinTemplateImplement, ShipJobMode}},
 	{Slug: "research", Name: "Research", Stages: []string{BuiltinTemplateResearch}},
 }
 
