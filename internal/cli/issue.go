@@ -53,6 +53,7 @@ func issueAddCmd() *cobra.Command {
 	var (
 		featureSlug, description, descriptionFile, stateStr, baseBranch, customerImpact string
 		tags                                                                            []string
+		autoRun                                                                         bool
 		rawInput                                                                        string
 	)
 	cmd := &cobra.Command{
@@ -61,7 +62,7 @@ func issueAddCmd() *cobra.Command {
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"feature", "description", "description-file", "state", "tag", "base-branch", "customer-impact")
+				"feature", "description", "description-file", "state", "tag", "base-branch", "customer-impact", "auto-run")
 			if err != nil {
 				return err
 			}
@@ -71,7 +72,7 @@ func issueAddCmd() *cobra.Command {
 			if len(args) != 1 {
 				return fmt.Errorf("requires <title> positional or --json")
 			}
-			return runIssueAdd(args[0], featureSlug, description, descriptionFile, stateStr, tags, baseBranch, customerImpact)
+			return runIssueAdd(args[0], featureSlug, description, descriptionFile, stateStr, tags, baseBranch, customerImpact, autoRun)
 		},
 	}
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "feature slug to attach to")
@@ -81,11 +82,12 @@ func issueAddCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "tag to attach (repeatable)")
 	cmd.Flags().StringVar(&baseBranch, "base-branch", "", "per-issue PR base-branch override (BACI-232; empty inherits from the feature, ultimately main)")
 	cmd.Flags().StringVar(&customerImpact, "customer-impact", "", "optional one-line customer impact in the user's terms (BACI-349; blank = no user-facing change, read surfaces fall back to the title)")
+	cmd.Flags().BoolVar(&autoRun, "auto-run", false, "start the new issue running the full Scope → Plan → Implement → Ship chain immediately (BACI-374; off by default here, the UI composers default it on)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
-func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr string, tags []string, baseBranch, customerImpact string) error {
+func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr string, tags []string, baseBranch, customerImpact string, autoRun bool) error {
 	desc, err := readLongText(description, descriptionFile, false, "description")
 	if err != nil {
 		return err
@@ -98,6 +100,7 @@ func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr stri
 		Tags:           tags,
 		BaseBranch:     baseBranch,
 		CustomerImpact: customerImpact,
+		AutoRun:        autoRun,
 	})
 }
 
