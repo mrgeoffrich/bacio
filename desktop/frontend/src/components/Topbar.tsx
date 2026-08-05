@@ -55,6 +55,8 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
     shippedCount,
     shippedScope,
     setShippedScope: onShippedScopeChange,
+    shippedRepoScope,
+    setShippedRepoScope: onShippedRepoScopeChange,
     flyingShipKey,
     shipFlashing,
     onShipFlightDone,
@@ -188,6 +190,8 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
           shippedCount={shippedCount}
           scope={shippedScope}
           onScopeChange={onShippedScopeChange}
+          repoScope={shippedRepoScope}
+          onRepoScopeChange={onShippedRepoScopeChange}
           timezone={timezone}
           onOpenIssue={onOpenIssue}
           flyingShipKey={flyingShipKey}

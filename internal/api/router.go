@@ -202,13 +202,18 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /proxy/jobs", d.handleProxyJobs)
 
 	// BACI-187: shipping-log popover — list of recently-done issues,
-	// newest-first, sibling of /history. Per-repo only; cross-repo is
-	// deliberately out of scope (matches the rest of the surface).
+	// newest-first, sibling of /history.
 	// BACI-221 reshapes the list response to {rows, total} and adds
-	// /shipped/count for the Pipeline Shipping-column pill's 10s
+	// /shipped/count for the Shipped pill's 10s
 	// scope-count poll. The literal "count" segment is more specific
 	// than the bare /shipped route, so ServeMux disambiguates without a
 	// conflicting pattern.
+	// BACI-371 adds the root-level cross-repo pair, which is the scope
+	// the pill defaults to; the per-repo pair below backs the popover's
+	// "this repo" narrowing. Same handler bodies, repo predicate on or
+	// off — cross-repo like /notifications and /history.
+	mux.HandleFunc("GET /shipped", d.handleShippedListAll)
+	mux.HandleFunc("GET /shipped/count", d.handleShippedCountAll)
 	mux.HandleFunc("GET /repos/{prefix}/shipped", d.handleShippedList)
 	mux.HandleFunc("GET /repos/{prefix}/shipped/count", d.handleShippedCount)
 

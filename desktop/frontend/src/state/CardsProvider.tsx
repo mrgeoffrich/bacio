@@ -5,7 +5,7 @@ import type { BoardCard, WaitingState } from '../api';
 import type { WaitingKind } from '../api';
 import type { DispatchMode, State } from '../../bindings/github.com/mrgeoffrich/bacio/internal/model';
 import type { ProcessSelection } from '../lib/pipelineProcesses';
-import type { ShippedScope } from '../components/shippedScope.ts';
+import type { ShippedScope, ShippedRepoScope } from '../components/shippedScope.ts';
 import { reportError } from '../errors';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from '../lib/issueState';
 import { useAsyncResource } from '../lib/hooks/useAsyncResource';
@@ -15,8 +15,15 @@ import { useOptimisticMutation } from '../lib/hooks/useOptimisticMutation';
 import { useShipFlourish } from '../lib/shipFlourish';
 import { useShipSfx } from '../lib/shipSfx';
 import { decideOdometerAction } from '../lib/odometer';
-import { STORAGE_KEY as SHIPPED_SCOPE_KEY, DEFAULT_SCOPE, shippedScopeCodec } from '../components/shippedScopePersistence.ts';
-import { scopeSinceParams } from '../components/shippedScope.ts';
+import {
+  STORAGE_KEY as SHIPPED_SCOPE_KEY,
+  DEFAULT_SCOPE,
+  shippedScopeCodec,
+  REPO_SCOPE_STORAGE_KEY as SHIPPED_REPO_SCOPE_KEY,
+  DEFAULT_REPO_SCOPE,
+  shippedRepoScopeCodec,
+} from '../components/shippedScopePersistence.ts';
+import { scopeSinceParams, shippedPrefix } from '../components/shippedScope.ts';
 import { useActiveRepo } from './RepoProvider';
 import { usePreferences } from './PreferencesProvider';
 
@@ -63,6 +70,10 @@ export type CardsContextValue = {
   shippedCount: number | null;
   shippedScope: ShippedScope;
   setShippedScope: Dispatch<SetStateAction<ShippedScope>>;
+  // BACI-371 repo axis — 'all' (the default) totals every repo, 'repo'
+  // narrows to the active board.
+  shippedRepoScope: ShippedRepoScope;
+  setShippedRepoScope: Dispatch<SetStateAction<ShippedRepoScope>>;
 };
 
 const CardsContext = createContext<CardsContextValue | null>(null);
@@ -414,6 +425,19 @@ export function CardsProvider({ children }: { children: ReactNode }) {
     shippedScopeCodec,
   );
 
+  // shippedRepoScope (BACI-371) is the repo axis, orthogonal to the time
+  // window above: 'all' totals every repo (the default), 'repo' narrows to
+  // the active board. Persisted on its own key, same recipe.
+  const [shippedRepoScope, setShippedRepoScope] = useLocalStorage<ShippedRepoScope>(
+    SHIPPED_REPO_SCOPE_KEY,
+    DEFAULT_REPO_SCOPE,
+    shippedRepoScopeCodec,
+  );
+  // The prefix both shipped reads take. 'all' is the cross-repo sentinel —
+  // also what a 'repo' scope collapses to when no board is active, so the
+  // pill still counts on a prefix-less URL.
+  const shippedPrefixValue = shippedPrefix(shippedRepoScope, activeBoard);
+
   // shippedCount (BACI-187, server-derived for BACI-221) feeds the "Shipped ·
   // N" pill. Polled on the standard cadence. `null` is the loading sentinel
   // the SFX watch treats as a snap (not a ding) on scope / repo change.
@@ -422,33 +446,26 @@ export function CardsProvider({ children }: { children: ReactNode }) {
   const prevShippedCountRef = useRef<number | null>(null);
   // refreshShippedCount (BACI-276): the single fetch the poll effect and the
   // on-ship trigger both invoke. Stable across renders; re-derived only when
-  // the board or scope changes.
+  // the effective prefix or the time scope changes.
   const refreshShippedCount = useCallback(() => {
-    if (!activeBoard || activeBoard === 'all') {
-      setShippedCount(0);
-      return;
-    }
     // BACI-312: 'today' resolves to an absolute local-midnight cutoff in the
     // user's timezone (sinceTs); week/forever keep the relative sinceDays.
     const { sinceDays, sinceTs } = scopeSinceParams(shippedScope, timezone);
-    api.countShippedIssues(activeBoard, sinceDays, sinceTs)
+    api.countShippedIssues(shippedPrefixValue, sinceDays, sinceTs)
       .then((n) => setShippedCount(n))
       .catch(() => { /* pill is best-effort; the popover surfaces failures */ });
-  }, [activeBoard, shippedScope, timezone]);
+  }, [shippedPrefixValue, shippedScope, timezone]);
   useEffect(() => {
-    if (!activeBoard || activeBoard === 'all') {
-      setShippedCount(0);
-      return;
-    }
     // Blank the count to `null` (not 0) on scope / repo change so a stale
     // number doesn't sit on the pill while the first fetch is in flight, AND
     // so the post-navigation refill never dings (BACI-295). decideOdometerAction
     // snaps on a null on both sides, so the refill reads as a fresh first-load.
     setShippedCount(null);
     refreshShippedCount();
-  }, [activeBoard, shippedScope, refreshShippedCount]);
-  // Poll the count on the standard cadence while a concrete board is open.
-  useInterval(refreshShippedCount, POLL_INTERVAL_MS, !!activeBoard && activeBoard !== 'all');
+  }, [shippedPrefixValue, shippedScope, refreshShippedCount]);
+  // Poll the count on the standard cadence. Always enabled — with the
+  // cross-repo default there is always something to count, board or no board.
+  useInterval(refreshShippedCount, POLL_INTERVAL_MS, true);
 
   // BACI-240 ka-ching SFX. The hook returns a stable `play`; the enabled
   // flag + autoplay-policy lock live inside it.
@@ -515,6 +532,8 @@ export function CardsProvider({ children }: { children: ReactNode }) {
       shippedCount,
       shippedScope,
       setShippedScope,
+      shippedRepoScope,
+      setShippedRepoScope,
     }),
     [
       cards,
@@ -548,6 +567,8 @@ export function CardsProvider({ children }: { children: ReactNode }) {
       shippedCount,
       shippedScope,
       setShippedScope,
+      shippedRepoScope,
+      setShippedRepoScope,
     ],
   );
 

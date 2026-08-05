@@ -385,3 +385,114 @@ func TestHandleShippedSinceTSBad(t *testing.T) {
 		t.Fatalf("status: %d, want 400 on bad ?since_ts=", resp.StatusCode)
 	}
 }
+
+// TestHandleShippedAllRepos (BACI-371) — GET /shipped ignores repo_id,
+// so rows from both repos come back newest-first and total spans both.
+func TestHandleShippedAllRepos(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	other := seedRepo2(t, s)
+
+	older := shipIssue(t, s, repo, "mine")
+	_ = shipIssue(t, s, other, "theirs")
+	if _, err := s.DB.Exec(`UPDATE issues SET terminal_at = datetime('now','-1 days') WHERE id = ?`, older.ID); err != nil {
+		t.Fatalf("back-date: %v", err)
+	}
+
+	resp, raw := apiGet(t, ts.URL+"/shipped")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var body api.ShippedListResponse
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode: %v body=%s", err, raw)
+	}
+	if len(body.Rows) != 2 || body.Total != 2 {
+		t.Fatalf("rows=%d total=%d, want 2/2 (both repos)", len(body.Rows), body.Total)
+	}
+	if body.Rows[0].Title != "theirs" || body.Rows[1].Title != "mine" {
+		t.Fatalf("rows = [%q %q], want newest-first [theirs mine]", body.Rows[0].Title, body.Rows[1].Title)
+	}
+	// The per-repo route must still narrow — the popover's "this repo".
+	resp, raw = apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped")
+	if resp.StatusCode != 200 {
+		t.Fatalf("per-repo status: %d body=%s", resp.StatusCode, raw)
+	}
+	var scoped api.ShippedListResponse
+	_ = json.Unmarshal(raw, &scoped)
+	if len(scoped.Rows) != 1 || scoped.Rows[0].Title != "mine" {
+		t.Fatalf("per-repo rows = %d, want only this repo's row", len(scoped.Rows))
+	}
+}
+
+// TestHandleShippedCountAllRepos (BACI-371) — the cross-repo count is
+// the sum across repos, strictly greater than either per-repo count.
+func TestHandleShippedCountAllRepos(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	other := seedRepo2(t, s)
+	for i := 0; i < 3; i++ {
+		shipIssue(t, s, repo, "mine")
+	}
+	shipIssue(t, s, other, "theirs")
+
+	resp, raw := apiGet(t, ts.URL+"/shipped/count")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var body api.ShippedCountResponse
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode: %v body=%s", err, raw)
+	}
+	if body.Total != 4 {
+		t.Fatalf("total = %d, want 4 (3 + 1 across repos)", body.Total)
+	}
+
+	resp, raw = apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped/count")
+	if resp.StatusCode != 200 {
+		t.Fatalf("per-repo status: %d body=%s", resp.StatusCode, raw)
+	}
+	var scoped api.ShippedCountResponse
+	_ = json.Unmarshal(raw, &scoped)
+	if scoped.Total != 3 {
+		t.Fatalf("per-repo total = %d, want 3", scoped.Total)
+	}
+	if body.Total <= scoped.Total {
+		t.Fatalf("cross-repo total %d must exceed per-repo total %d", body.Total, scoped.Total)
+	}
+}
+
+// TestHandleShippedAllReposSinceWindow (BACI-371) — the cross-repo
+// routes share parseShippedSince with their per-repo siblings, so the
+// ?since= window clamps rows and count across repos too.
+func TestHandleShippedAllReposSinceWindow(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	other := seedRepo2(t, s)
+
+	old := shipIssue(t, s, other, "old")
+	_ = shipIssue(t, s, repo, "young")
+	if _, err := s.DB.Exec(`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`, old.ID); err != nil {
+		t.Fatalf("back-date: %v", err)
+	}
+
+	resp, raw := apiGet(t, ts.URL+"/shipped?since=7d")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var body api.ShippedListResponse
+	_ = json.Unmarshal(raw, &body)
+	if len(body.Rows) != 1 || body.Total != 1 {
+		t.Fatalf("rows=%d total=%d, want 1/1 (old cross-repo row outside window)", len(body.Rows), body.Total)
+	}
+
+	resp, raw = apiGet(t, ts.URL+"/shipped/count?since=7d")
+	if resp.StatusCode != 200 {
+		t.Fatalf("count status: %d body=%s", resp.StatusCode, raw)
+	}
+	var count api.ShippedCountResponse
+	_ = json.Unmarshal(raw, &count)
+	if count.Total != 1 {
+		t.Fatalf("count total = %d, want 1", count.Total)
+	}
+}

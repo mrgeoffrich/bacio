@@ -330,7 +330,8 @@ func (c *remoteClient) archiveIssue(ctx context.Context, repo *model.Repo, key s
 	return &out, nil
 }
 
-// ListShippedIssues (BACI-187) — GET /repos/{prefix}/shipped. Hits the
+// ListShippedIssues (BACI-187) — GET /repos/{prefix}/shipped, or the
+// cross-repo GET /shipped when repo is nil (BACI-371). Hits the
 // REST endpoint with the popover's typical (since, limit) shape and
 // decodes the lean DTO list into sparse *model.Issue rows. PR URLs,
 // feature emoji, etc. that ride the DTO but not the Issue struct are
@@ -339,9 +340,6 @@ func (c *remoteClient) archiveIssue(ctx context.Context, repo *model.Repo, key s
 // run against the local backend (or talk directly to the HTTP endpoint
 // from the browser via api.http.ts) so they keep the full DTO shape.
 func (c *remoteClient) ListShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) ([]*model.Issue, error) {
-	if repo == nil {
-		return nil, fmt.Errorf("ListShippedIssues requires a repo")
-	}
 	q := url.Values{}
 	if f.Limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", f.Limit))
@@ -371,7 +369,7 @@ func (c *remoteClient) ListShippedIssues(ctx context.Context, repo *model.Repo, 
 		Rows  []shippedDTO `json:"rows"`
 		Total int          `json:"total"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/shipped", q, nil, &raw); err != nil {
+	if err := c.do(ctx, http.MethodGet, shippedPath(repo, ""), q, nil, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]*model.Issue, 0, len(raw.Rows))
@@ -391,20 +389,18 @@ func (c *remoteClient) ListShippedIssues(ctx context.Context, repo *model.Repo, 
 			FeatureEmoji: d.FeatureEmoji,
 			TerminalAt:   &t,
 		}
-		_ = prefix // prefix is implicit in repo.Prefix; Issue.RepoID stays zero on the remote path.
+		_ = prefix // the prefix rides Key (which may be a foreign repo's on the cross-repo path); Issue.RepoID stays zero on the remote path.
 		out = append(out, iss)
 	}
 	return out, nil
 }
 
-// CountShippedIssues (BACI-221) — GET /repos/{prefix}/shipped/count.
+// CountShippedIssues (BACI-221) — GET /repos/{prefix}/shipped/count,
+// or the cross-repo GET /shipped/count when repo is nil (BACI-371).
 // Mirrors ListShippedIssues' absolute ?since_ts= shape (BACI-312); the
 // count endpoint deliberately has no ?limit= parameter — the count is
 // total under the scope, independent of any per-fetch row cap.
 func (c *remoteClient) CountShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) (int, error) {
-	if repo == nil {
-		return 0, fmt.Errorf("CountShippedIssues requires a repo")
-	}
 	q := url.Values{}
 	if f.Since != nil {
 		q.Set("since_ts", f.Since.UTC().Format(time.RFC3339))
@@ -412,8 +408,18 @@ func (c *remoteClient) CountShippedIssues(ctx context.Context, repo *model.Repo,
 	var out struct {
 		Total int `json:"total"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/shipped/count", q, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, shippedPath(repo, "/count"), q, nil, &out); err != nil {
 		return 0, err
 	}
 	return out.Total, nil
+}
+
+// shippedPath picks between the per-repo shipping-log routes and their
+// BACI-371 cross-repo siblings: a nil repo means "every repo", which
+// the server expresses as the root-level /shipped[/count] pair.
+func shippedPath(repo *model.Repo, suffix string) string {
+	if repo == nil {
+		return "/shipped" + suffix
+	}
+	return "/repos/" + repo.Prefix + "/shipped" + suffix
 }

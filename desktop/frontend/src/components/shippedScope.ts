@@ -1,8 +1,10 @@
-// Single source of truth for the BACI-221 Today / Last Week / Forever
-// scope picker on the Pipeline Shipping-column Shipped popover. App.tsx owns the active
-// scope state (so the pill count and the popover list can never drift),
-// ShippedPopover renders the picker, and both reach for `scopeSinceDays`
-// here when shaping the API call. Keeping the type + the cutoff math in
+// Single source of truth for the Shipped popover's two scope axes: the
+// BACI-221 Today / Last Week / Forever time window and the BACI-371
+// all-repos / this-repo repo scope. CardsProvider owns both pieces of
+// state (so the pill count and the popover list can never drift),
+// ShippedPopover renders the two pickers, and both reach for
+// `scopeSinceParams` / `shippedPrefix` here when shaping the API call.
+// Keeping the types + the cutoff math in
 // one tiny module is the same pattern other UI helpers in this folder
 // follow (boardCompactPersistence.ts is the closest precedent for
 // shared-but-typed UI constants).
@@ -153,4 +155,41 @@ export function scopeLabel(s: ShippedScope): string {
 // localStorage) is treated as "unknown, fall back to default".
 export function isShippedScope(value: unknown): value is ShippedScope {
   return value === 'today' || value === 'week' || value === 'forever';
+}
+
+// ShippedRepoScope (BACI-371) is the second, independent axis of the
+// popover's scope: which repositories count, as opposed to which time
+// window. 'all' totals every repo (the default — the counter is a
+// momentum readout, and momentum isn't per-repo); 'repo' narrows back
+// to whichever board is active.
+export type ShippedRepoScope = 'all' | 'repo';
+
+// SHIPPED_REPO_SCOPES is the canonical ordered list the repo strip
+// renders — all-repos first, matching the default.
+export const SHIPPED_REPO_SCOPES: ShippedRepoScope[] = ['all', 'repo'];
+
+// isShippedRepoScope guards the persisted value the same way
+// isShippedScope guards the time window.
+export function isShippedRepoScope(value: unknown): value is ShippedRepoScope {
+  return value === 'all' || value === 'repo';
+}
+
+// repoScopeLabel is the display text for a repo-scope button. The
+// 'repo' button wears the active board's prefix so the choice reads
+// concretely ("BACI", not "This repo"); with no board active there is
+// no prefix to show and the button is disabled, so the generic label
+// is the fallback.
+export function repoScopeLabel(s: ShippedRepoScope, activeBoard: string): string {
+  if (s === 'all') return 'All repos';
+  return activeBoard || 'This repo';
+}
+
+// shippedPrefix resolves the (repoScope, activeBoard) pair into the
+// prefix both API calls take. 'all' is the cross-repo sentinel both
+// transports understand; it is also what a 'repo' scope collapses to
+// when no board is active, so a prefix-less URL still counts something
+// rather than erroring.
+export function shippedPrefix(repoScope: ShippedRepoScope, activeBoard: string): string {
+  if (repoScope === 'repo' && activeBoard) return activeBoard;
+  return 'all';
 }

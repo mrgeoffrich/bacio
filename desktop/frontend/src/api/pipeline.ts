@@ -256,9 +256,11 @@ export async function getImpactPrimary(repoPrefix: string): Promise<boolean> {
 }
 
 // listShippedIssues (BACI-187, reshaped for BACI-221) returns the
-// Pipeline Shipping-column shipping-log popover rows for one repo (newest-first) wrapped
+// shipping-log popover rows (newest-first) wrapped
 // with the total count under the same scope so the popover header can
-// render "showing N of TOTAL". `sinceDays` clamps the relative window
+// render "showing N of TOTAL". `repoPrefix` narrows to one repo; empty
+// or 'all' (BACI-371) is the popover's default cross-repo scope.
+// `sinceDays` clamps the relative window
 // (0 = "Forever" — no lower bound on terminal_at); `sinceTs` (BACI-312)
 // is the absolute local-midnight "Today" cutoff (RFC3339) and wins over
 // sinceDays when non-empty; `limit` caps the row count (0 = the server's
@@ -278,10 +280,12 @@ export async function listShippedIssues(
 }
 
 // countShippedIssues (BACI-221) is the lean count-only sibling polled
-// on the Pipeline Shipping-column pill's 10s cadence so the "Shipped · N" label reflects
+// on the Shipped pill's 10s cadence so the "Shipped · N" label reflects
 // the active Today / Last Week / Forever scope even when the popover
-// is closed. `sinceDays` / `sinceTs` mirror listShippedIssues — sinceDays
-// 0 means "Forever"; a non-empty sinceTs is the absolute "Today" cutoff.
+// is closed. `repoPrefix` / `sinceDays` / `sinceTs` mirror
+// listShippedIssues — empty or 'all' counts across every repo (BACI-371),
+// sinceDays 0 means "Forever", a non-empty sinceTs is the absolute
+// "Today" cutoff.
 export async function countShippedIssues(
   repoPrefix: string,
   sinceDays: number,

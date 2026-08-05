@@ -7,10 +7,11 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
-// ShippedFilter scopes the BACI-187 shipping-log read. RepoID is
-// required (the popover is per-repo, same as every other surface);
-// Since clamps the window to a lower bound on `terminal_at` (omit for
-// "as far back as Limit allows"); Limit caps the result count.
+// ShippedFilter scopes the BACI-187 shipping-log read. RepoID nil
+// means every repo — the BACI-371 default for the Shipped pill; set it
+// to narrow to one repo. Since clamps the window to a lower bound on
+// `terminal_at` (omit for "as far back as Limit allows"); Limit caps
+// the result count.
 type ShippedFilter struct {
 	RepoID *int64
 	Since  *time.Time

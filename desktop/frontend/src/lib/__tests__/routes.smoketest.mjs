@@ -20,6 +20,7 @@ const moduleRoot = path.resolve(__dirname, '..');
 const {
   viewPath,
   issuePath,
+  repoPrefixFromKey,
   featurePath,
   documentPath,
   viewFromPath,
@@ -42,6 +43,19 @@ test('viewPath scopes routes to the prefix; board/docs keep their label aliases'
 
 test('issuePath builds the prefixed workspace route', () => {
   assert.equal(issuePath('BACI', 'BACI-100'), '/BACI/issues/BACI-100');
+});
+
+test('repoPrefixFromKey reads the prefix a cross-repo deep-link needs', () => {
+  // BACI-371: the Shipped popover lists rows from every repo, so a row
+  // click must route under the key's own prefix.
+  assert.equal(repoPrefixFromKey('BACI-100'), 'BACI');
+  assert.equal(repoPrefixFromKey('OTHR-7'), 'OTHR');
+  // Anything that isn't PREFIX-N returns '' so the caller can fall back
+  // to the active board.
+  assert.equal(repoPrefixFromKey('not-a-key'), '');
+  assert.equal(repoPrefixFromKey('BACI-'), '');
+  assert.equal(repoPrefixFromKey(''), '');
+  assert.equal(repoPrefixFromKey(undefined), '');
 });
 
 test('featurePath builds the prefixed feature detail route', () => {

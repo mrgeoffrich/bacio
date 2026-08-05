@@ -671,13 +671,14 @@ func (c *localClient) ClaimNextIssue(ctx context.Context, repo *model.Repo, slug
 }
 
 // ListShippedIssues (BACI-187) is the local-backend shipping-log read.
-// repo is required (the popover is per-repo); the caller's f.RepoID is
-// overwritten with repo.ID so the surface is unambiguous.
+// The caller's f.RepoID is always overwritten from repo so the surface
+// is unambiguous: a repo narrows to that repo, nil (BACI-371) lists
+// across every repo.
 func (c *localClient) ListShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) ([]*model.Issue, error) {
-	if repo == nil {
-		return nil, fmt.Errorf("ListShippedIssues requires a repo")
+	f.RepoID = nil
+	if repo != nil {
+		f.RepoID = &repo.ID
 	}
-	f.RepoID = &repo.ID
 	rows, err := c.store.ListShippedIssues(f)
 	if err != nil {
 		return nil, err
@@ -689,13 +690,13 @@ func (c *localClient) ListShippedIssues(ctx context.Context, repo *model.Repo, f
 }
 
 // CountShippedIssues (BACI-221) is the local-backend count read for
-// the Pipeline Shipping-column Shipped pill. Thin wrapper over
-// store.CountShippedIssues — repo is required and overwrites f.RepoID
-// for the same unambiguity reason ListShippedIssues applies.
+// the Shipped pill. Thin wrapper over store.CountShippedIssues — repo
+// overwrites f.RepoID for the same unambiguity reason
+// ListShippedIssues applies, nil meaning every repo.
 func (c *localClient) CountShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) (int, error) {
-	if repo == nil {
-		return 0, fmt.Errorf("CountShippedIssues requires a repo")
+	f.RepoID = nil
+	if repo != nil {
+		f.RepoID = &repo.ID
 	}
-	f.RepoID = &repo.ID
 	return c.store.CountShippedIssues(f)
 }

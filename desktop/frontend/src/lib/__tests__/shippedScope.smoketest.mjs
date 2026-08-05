@@ -13,8 +13,17 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const componentsRoot = path.resolve(__dirname, '..', '..', 'components');
 
-const { SHIPPED_SCOPES, scopeSinceDays, scopeSinceParams, scopeLabel, isShippedScope } =
-  await import(path.join(componentsRoot, 'shippedScope.ts'));
+const {
+  SHIPPED_SCOPES,
+  scopeSinceDays,
+  scopeSinceParams,
+  scopeLabel,
+  isShippedScope,
+  SHIPPED_REPO_SCOPES,
+  isShippedRepoScope,
+  repoScopeLabel,
+  shippedPrefix,
+} = await import(path.join(componentsRoot, 'shippedScope.ts'));
 
 // localStorage shim — Node doesn't have one. The persistence helper
 // only needs getItem / setItem; everything else can stay missing.
@@ -115,6 +124,67 @@ test('readShippedScope falls back to default on garbage in the store', () => {
   // Simulate a hand-edited localStorage with a legacy / typo value.
   store.set(persistence.STORAGE_KEY, 'yesterday');
   assert.equal(persistence.readShippedScope(), persistence.DEFAULT_SCOPE);
+});
+
+// ── BACI-371 repo scope ────────────────────────────────────────────────
+
+test('SHIPPED_REPO_SCOPES lists the two repo scopes, all-repos first', () => {
+  assert.deepEqual(SHIPPED_REPO_SCOPES, ['all', 'repo']);
+});
+
+test('isShippedRepoScope accepts the two canonical strings and rejects the rest', () => {
+  assert.equal(isShippedRepoScope('all'), true);
+  assert.equal(isShippedRepoScope('repo'), true);
+  assert.equal(isShippedRepoScope('current'), false);
+  assert.equal(isShippedRepoScope(''), false);
+  assert.equal(isShippedRepoScope(null), false);
+  assert.equal(isShippedRepoScope(undefined), false);
+});
+
+test('repoScopeLabel wears the active prefix on the narrowing button', () => {
+  assert.equal(repoScopeLabel('all', 'BACI'), 'All repos');
+  assert.equal(repoScopeLabel('repo', 'BACI'), 'BACI');
+  // With no board open there is no prefix to show — the button is
+  // disabled anyway, so the generic label is the fallback.
+  assert.equal(repoScopeLabel('repo', ''), 'This repo');
+});
+
+test('shippedPrefix resolves the (repoScope, activeBoard) pair', () => {
+  assert.equal(shippedPrefix('all', 'BACI'), 'all');
+  assert.equal(shippedPrefix('repo', 'BACI'), 'BACI');
+  // No board to narrow to → collapse back to the cross-repo sentinel so
+  // the pill still counts something on a prefix-less URL.
+  assert.equal(shippedPrefix('repo', ''), 'all');
+  assert.equal(shippedPrefix('repo', 'all'), 'all');
+});
+
+test('readShippedRepoScope defaults to all on an empty store', () => {
+  store.clear();
+  assert.equal(persistence.readShippedRepoScope(), 'all');
+  assert.equal(persistence.DEFAULT_REPO_SCOPE, 'all');
+});
+
+test('readShippedRepoScope round-trips a stored scope', () => {
+  store.clear();
+  persistence.persistShippedRepoScope('repo');
+  assert.equal(persistence.readShippedRepoScope(), 'repo');
+  persistence.persistShippedRepoScope('all');
+  assert.equal(persistence.readShippedRepoScope(), 'all');
+});
+
+test('readShippedRepoScope falls back to default on garbage in the store', () => {
+  store.clear();
+  store.set(persistence.REPO_SCOPE_STORAGE_KEY, 'current');
+  assert.equal(persistence.readShippedRepoScope(), persistence.DEFAULT_REPO_SCOPE);
+});
+
+test('the two scope axes persist on separate keys', () => {
+  store.clear();
+  persistence.persistShippedScope('today');
+  persistence.persistShippedRepoScope('repo');
+  assert.equal(persistence.readShippedScope(), 'today');
+  assert.equal(persistence.readShippedRepoScope(), 'repo');
+  assert.notEqual(persistence.STORAGE_KEY, persistence.REPO_SCOPE_STORAGE_KEY);
 });
 
 let failed = 0;
