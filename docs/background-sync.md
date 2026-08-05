@@ -57,6 +57,21 @@ Exposed read-only over:
 
 The React `api.http.ts` consumes both. The desktop / web `Sync` topbar badge is a **live status indicator**, not a button — there is no manual "Sync now" affordance in the UI; the ticker is the only writer. Manual `bacio sync` from the CLI still works and is the right tool for "I want to force a push right now."
 
+### `configured` is not "is this repo synced" (BACI-376)
+
+The export is **whole-DB**: [`Engine.Export`](../internal/sync/export.go) walks `store.ListRepos()` with no filter and writes every tracked repo into `repos/<prefix>/` of whichever sync repo the tick is running against. So a project that has never seen `bacio sync init` still has its issues mirrored the moment *any other* project on this machine drives a tick.
+
+That makes two per-repo questions, and the status payload answers both:
+
+| Field | Means |
+|---|---|
+| `configured` | this repo has a `sync.remote` in its own `.bacio/config.yaml` **and** a `sync_remotes` row resolving it — i.e. it can drive a tick itself. Gate for the setup flow and the "Unsynced projects" list. |
+| `mirrored_by` | the label of the sync repo whose local clone already carries this repo's `repos/<prefix>/` folder — i.e. its data *is* being mirrored, whoever drove the tick. When set, `last_sync_at` / `last_error` describe that sync repo's last run. |
+
+[`sync.MirrorCoverage`](../internal/sync/coverage.go) computes the second one (one `os.ReadDir` per registered sync remote) and both the HTTP handler and `client.localClient.SyncStatuses` read through it, so the two transports can't drift. It answers the same on-disk question `DiscoverMembership` does, which is what keeps the topbar badge and the Sync settings registry consistent — before BACI-376 the badge read only `configured` and reported "sync not configured" for repos the settings screen simultaneously listed as `linked` members of the sync repo.
+
+The badge's variants live in [`desktop/frontend/src/lib/syncBadge.ts`](../desktop/frontend/src/lib/syncBadge.ts): `syncing` → `paused` (mirrored, but `background_enabled` is off) → `error` → `enabled` (configured **or** mirrored) → `unconfigured` (nothing mirrors it).
+
 ## Per-tick logic (the algorithm)
 
 For each sync-enabled repo:

@@ -14,12 +14,13 @@ import (
 
 // syncStatus mirrors api.SyncStatusOut for decoding test responses.
 type syncStatus struct {
-	Prefix            string `json:"prefix"`
-	Configured        bool   `json:"configured"`
-	BackgroundEnabled bool   `json:"background_enabled"`
-	InProgress        bool   `json:"in_progress"`
+	Prefix            string  `json:"prefix"`
+	Configured        bool    `json:"configured"`
+	MirroredBy        string  `json:"mirrored_by"`
+	BackgroundEnabled bool    `json:"background_enabled"`
+	InProgress        bool    `json:"in_progress"`
 	LastError         *string `json:"last_error"`
-	Remote            string `json:"remote"`
+	Remote            string  `json:"remote"`
 }
 
 // TestSyncStatusListEmptyConfig: GET /sync over a DB whose one repo has
@@ -394,6 +395,57 @@ func TestSyncRegistryListConfiguredProjectNotUnsynced(t *testing.T) {
 		if up.Prefix == repo.Prefix {
 			t.Fatalf("configured repo appears under unsynced_projects: %+v", up)
 		}
+	}
+}
+
+// TestSyncStatusReportsMirroredWithoutOwnConfig pins BACI-376: the
+// export is whole-DB, so a repo with no .bacio/config.yaml of its own
+// is still mirrored into any sync repo on this machine that carries its
+// prefix. The status must say so — reporting only configured:false is
+// what made the Pipeline badge disagree with the Sync settings screen,
+// which lists the same repo as a linked member of that sync repo.
+func TestSyncStatusReportsMirroredWithoutOwnConfig(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s) // no .bacio/config.yaml written
+
+	clone := mkSyncCloneLayout(t, repo.Prefix)
+	if err := s.UpsertSyncRemote("git@example.com:bacio/team-sync.git", clone); err != nil {
+		t.Fatalf("UpsertSyncRemote: %v", err)
+	}
+
+	resp, body := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/sync")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
+	}
+	var st syncStatus
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if st.Configured {
+		t.Fatal("configured = true, want false (the repo has no sync remote of its own)")
+	}
+	if st.MirroredBy != "team-sync" {
+		t.Fatalf("mirrored_by = %q, want team-sync", st.MirroredBy)
+	}
+}
+
+// TestSyncStatusUnmirroredRepoStaysEmpty: with no sync remotes at all,
+// mirrored_by stays empty — the badge's "not set up" state has to remain
+// reachable.
+func TestSyncStatusUnmirroredRepoStaysEmpty(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+
+	resp, body := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/sync")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
+	}
+	var st syncStatus
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if st.MirroredBy != "" {
+		t.Fatalf("mirrored_by = %q, want empty", st.MirroredBy)
 	}
 }
 

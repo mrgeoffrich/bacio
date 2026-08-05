@@ -16,6 +16,7 @@ import (
 type SyncStatus struct {
 	Prefix            string     `json:"prefix"`
 	Configured        bool       `json:"configured"`
+	MirroredBy        string     `json:"mirrored_by,omitempty"`
 	BackgroundEnabled bool       `json:"background_enabled"`
 	InProgress        bool       `json:"in_progress"`
 	LastSyncAt        *time.Time `json:"last_sync_at,omitempty"`
@@ -38,9 +39,22 @@ func (c *localClient) SyncStatuses(ctx context.Context) ([]SyncStatus, error) {
 	if err != nil {
 		return nil, err
 	}
+	coverage, err := sync.MirrorCoverage(c.store)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]SyncStatus, 0, len(repos))
 	for _, repo := range repos {
 		st := SyncStatus{Prefix: repo.Prefix, BackgroundEnabled: bgEnabled}
+		// BACI-376: mirror coverage is independent of this repo's own
+		// config — the export is whole-DB, so a project with no sync
+		// config is mirrored all the same. Applied first; a repo that
+		// also drives its own tick overwrites the timestamps below.
+		if src, ok := coverage[repo.Prefix]; ok {
+			st.MirroredBy = src.Label
+			st.LastSyncAt = src.LastSyncAt
+			st.LastError = src.LastError
+		}
 		if repo.Path != "" {
 			cfg, cerr := sync.ReadProjectConfig(repo.Path)
 			if cerr == nil && cfg.Sync.Remote != "" {
