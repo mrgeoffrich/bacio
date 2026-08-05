@@ -96,12 +96,16 @@ Incoming requests carry their own actor via the X-Actor header (default "api").`
 			if logRes, err := resolveLogging(env); err == nil {
 				logDir = logRes.Dir
 			}
+			// BACI-368: same launch-repo resolution as `bacio web`, so the
+			// Vite dev loop (`bacio api` + `npm run dev:web`) behaves
+			// identically to the bundled UI.
 			srv := api.New(s, api.Options{
-				Addr:        addr,
-				Token:       token,
-				CORSOrigins: corsOrigins,
-				DBPath:      env.DBPath,
-				LogDir:      logDir,
+				Addr:             addr,
+				Token:            token,
+				CORSOrigins:      corsOrigins,
+				DBPath:           env.DBPath,
+				LogDir:           logDir,
+				LaunchRepoPrefix: launchRepoPrefix(s, logger),
 			}, logger)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

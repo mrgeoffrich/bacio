@@ -38,6 +38,14 @@ export async function listColumns(): Promise<BoardColumn[]> {
   return Object.entries(STATE_LABELS).map(([state, label]) => ({ state, label }));
 }
 
+// getLaunchRepo returns the prefix of the repo the *server* process was
+// launched from (BACI-368), or '' when it wasn't started inside one. In a
+// cross-origin deployment that's the server's cwd repo, not the browser's —
+// the only sensible reading.
+export async function getLaunchRepo(): Promise<string> {
+  return (await call<{ prefix: string }>('/launch-repo')).prefix;
+}
+
 export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
   // The "all repos" pseudo-board isn't directly addressable over REST;
   // a v2 follow-up could add `GET /cards`. For now require a

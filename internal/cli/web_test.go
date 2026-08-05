@@ -44,43 +44,57 @@ func TestNewWebCmd_AddrDefaultMatchesAPI(t *testing.T) {
 // TestOpenBrowserWhenReady_LaunchesAfterHealthz spins a tiny test
 // server with a /healthz handler, swaps in a fake browser launcher,
 // and asserts the launcher is invoked exactly once with the right URL
-// once /healthz returns 200.
+// once /healthz returns 200. A resolved launch repo (BACI-368) sends
+// the browser straight to that repo's Pipeline; without one the URL
+// stays the bare /ui/ mount.
 func TestOpenBrowserWhenReady_LaunchesAfterHealthz(t *testing.T) {
-	withFastPoll(t)
-
-	var launches atomic.Int32
-	var seenURL atomic.Value // string
-	prev := browserLauncher
-	t.Cleanup(func() { browserLauncher = prev })
-	browserLauncher = func(_ context.Context, url string) error {
-		launches.Add(1)
-		seenURL.Store(url)
-		return nil
+	cases := []struct {
+		name    string
+		prefix  string
+		urlPath string
+	}{
+		{name: "no launch repo", prefix: "", urlPath: "/ui/"},
+		{name: "launch repo resolved", prefix: "BACI", urlPath: "/ui/BACI/pipeline"},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withFastPoll(t)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, `{"ok":true}`)
-	})
-	ts := httptest.NewServer(mux)
-	t.Cleanup(ts.Close)
-	host, port, err := net.SplitHostPort(stripScheme(ts.URL))
-	if err != nil {
-		t.Fatalf("split test url: %v", err)
-	}
-	addr := net.JoinHostPort(host, port)
+			var launches atomic.Int32
+			var seenURL atomic.Value // string
+			prev := browserLauncher
+			t.Cleanup(func() { browserLauncher = prev })
+			browserLauncher = func(_ context.Context, url string) error {
+				launches.Add(1)
+				seenURL.Store(url)
+				return nil
+			}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	openBrowserWhenReady(ctx, addr, discardLogger())
+			mux := http.NewServeMux()
+			mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(w, `{"ok":true}`)
+			})
+			ts := httptest.NewServer(mux)
+			t.Cleanup(ts.Close)
+			host, port, err := net.SplitHostPort(stripScheme(ts.URL))
+			if err != nil {
+				t.Fatalf("split test url: %v", err)
+			}
+			addr := net.JoinHostPort(host, port)
 
-	if n := launches.Load(); n != 1 {
-		t.Fatalf("expected 1 launch, got %d", n)
-	}
-	wantURL := fmt.Sprintf("http://%s/ui/", addr)
-	if got := seenURL.Load().(string); got != wantURL {
-		t.Fatalf("launcher url: want %q, got %q", wantURL, got)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			openBrowserWhenReady(ctx, addr, tc.prefix, discardLogger())
+
+			if n := launches.Load(); n != 1 {
+				t.Fatalf("expected 1 launch, got %d", n)
+			}
+			wantURL := fmt.Sprintf("http://%s%s", addr, tc.urlPath)
+			if got := seenURL.Load().(string); got != wantURL {
+				t.Fatalf("launcher url: want %q, got %q", wantURL, got)
+			}
+		})
 	}
 }
 
@@ -101,7 +115,7 @@ func TestOpenBrowserWhenReady_ContextCancelStops(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		// 127.0.0.1:1 is reserved + closed — /healthz never returns 200.
-		openBrowserWhenReady(ctx, "127.0.0.1:1", discardLogger())
+		openBrowserWhenReady(ctx, "127.0.0.1:1", "", discardLogger())
 		close(done)
 	}()
 	cancel()
@@ -135,7 +149,7 @@ func TestOpenBrowserWhenReady_DeadlineExits(t *testing.T) {
 	done := make(chan struct{})
 	start := time.Now()
 	go func() {
-		openBrowserWhenReady(context.Background(), "127.0.0.1:1", discardLogger())
+		openBrowserWhenReady(context.Background(), "127.0.0.1:1", "", discardLogger())
 		close(done)
 	}()
 	select {

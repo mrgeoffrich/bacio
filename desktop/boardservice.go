@@ -311,10 +311,26 @@ type (
 // and AddComment (both driven from the issue-drawer Edit modal).
 type BoardService struct {
 	client client.Client
+	// launchRepoPrefix is the repo the desktop binary was started in
+	// (BACI-368), resolved once in main() from the cwd captured before
+	// Wails can chdir. Empty when the app wasn't launched from inside a
+	// git repo — e.g. from the Finder / dock.
+	launchRepoPrefix string
 }
 
-func NewBoardService(c client.Client) *BoardService {
-	return &BoardService{client: c}
+func NewBoardService(c client.Client, launchRepoPrefix string) *BoardService {
+	return &BoardService{client: c, launchRepoPrefix: launchRepoPrefix}
+}
+
+// LaunchRepo returns the prefix of the repo the app was launched from,
+// or "" when there wasn't one. The React tree uses it as the
+// highest-priority default when the URL carries no repo prefix
+// (BACI-368) — the desktop half of the web's GET /launch-repo.
+//
+// The error return is vestigial (there is nothing to fail) but keeps
+// the generated binding a rejectable promise like its siblings.
+func (b *BoardService) LaunchRepo() (string, error) {
+	return b.launchRepoPrefix, nil
 }
 
 // resolveRepoForKey turns a repo prefix into a *model.Repo. When the prefix

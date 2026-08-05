@@ -68,16 +68,25 @@ export function RepoProvider({ children }: { children: ReactNode }) {
   const [boards, setBoards] = useState<Board[]>([]);
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [loading, setLoading] = useState(true);
+  // BACI-368: the repo the process was launched from. Loaded alongside the
+  // boards so `loading` covers it too — Shell renders "Loading…" rather than
+  // <Routes> while loading, so the bare-`/` redirect can't fire on a stale
+  // fallback and flash the wrong repo.
+  const [launchPrefix, setLaunchPrefix] = useState('');
 
   // Load the repository list + columns once on mount. A mount-time failure
   // no longer blanks the renderer (BACI-43): the modal surfaces the error,
   // the Topbar stays usable, and the views render their own empty states
   // until the data lands.
   useEffect(() => {
-    Promise.all([api.listBoards(), api.listColumns()])
-      .then(([bs, cols]) => {
+    // The launch-repo fetch is caught individually: an older or remote
+    // server without the route 404s, which should degrade to the
+    // remembered pick rather than blank the boards list.
+    Promise.all([api.listBoards(), api.listColumns(), api.getLaunchRepo().catch(() => '')])
+      .then(([bs, cols, launch]) => {
         setBoards(bs);
         setColumns(cols);
+        setLaunchPrefix(launch);
         setLoading(false);
       })
       .catch(err => {
@@ -99,9 +108,17 @@ export function RepoProvider({ children }: { children: ReactNode }) {
   // loaded. While loading we defer (boards aren't in yet).
   const prefixUnknown =
     !loading && !!urlPrefix && !matchedBoard && !legacyPageWord(urlPrefix);
-  // The repo a prefix-less / bare path should redirect to: the last
-  // validated localStorage pick if it still exists, else the first board.
+  // The repo a prefix-less / bare path should redirect to. Precedence, and
+  // don't "tidy" it back (BACI-368): the repo the app was launched from wins
+  // over the remembered pick — opening bacio inside a repo should land you in
+  // *that* repo, not wherever you happened to be last time. The remembered
+  // pick still governs when there's no launch repo (Finder / bare shell),
+  // which is the ticket's explicit out-of-scope case. Match the launch prefix
+  // case-insensitively and emit the canonical board.prefix casing, as the URL
+  // matcher above already does.
   const fallbackPrefix = (() => {
+    const launched = boards.find(b => b.prefix.toLowerCase() === launchPrefix.toLowerCase());
+    if (launchPrefix && launched) return launched.prefix;
     const remembered = readLocalStorage(REPO_KEY) ?? '';
     if (boards.some(b => b.prefix === remembered)) return remembered;
     return boards[0]?.prefix ?? '';
