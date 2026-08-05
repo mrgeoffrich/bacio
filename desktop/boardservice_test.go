@@ -320,17 +320,27 @@ type fakeShippedClient struct {
 	// nil Since rather than a 30-day cutoff (the pre-BACI-221 default).
 	lastFilter      store.ShippedFilter
 	lastCountFilter store.ShippedFilter
+	// lastRepo / lastCountRepo capture the repo argument (BACI-371) so a
+	// test can assert the cross-repo scope reaches the client as nil.
+	lastRepo      *model.Repo
+	lastCountRepo *model.Repo
+	// prefixLookups counts GetRepoByPrefix calls — the cross-repo scope
+	// must not resolve a repo at all.
+	prefixLookups int
 }
 
 func (f *fakeShippedClient) GetRepoByPrefix(context.Context, string) (*model.Repo, error) {
+	f.prefixLookups++
 	return f.repo, nil
 }
-func (f *fakeShippedClient) ListShippedIssues(_ context.Context, _ *model.Repo, sf store.ShippedFilter) ([]*model.Issue, error) {
+func (f *fakeShippedClient) ListShippedIssues(_ context.Context, repo *model.Repo, sf store.ShippedFilter) ([]*model.Issue, error) {
 	f.lastFilter = sf
+	f.lastRepo = repo
 	return f.shipped, nil
 }
-func (f *fakeShippedClient) CountShippedIssues(_ context.Context, _ *model.Repo, sf store.ShippedFilter) (int, error) {
+func (f *fakeShippedClient) CountShippedIssues(_ context.Context, repo *model.Repo, sf store.ShippedFilter) (int, error) {
 	f.lastCountFilter = sf
+	f.lastCountRepo = repo
 	if f.total > 0 {
 		return f.total, nil
 	}
@@ -393,15 +403,31 @@ func TestListShipped(t *testing.T) {
 	}
 }
 
-// TestListShippedRejectsAllRepos — the popover is per-repo by design;
-// calling ListShipped with "" or "all" must surface a clear error.
-func TestListShippedRejectsAllRepos(t *testing.T) {
-	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}}, "")
-	if _, err := svc.ListShipped("", 0, "", 0); err == nil {
-		t.Error("ListShipped(\"\") = nil, want error (per-repo only)")
+// TestListShippedAllRepos (BACI-371) — "" / "all" is the popover's
+// default scope, not an error: no repo is resolved and the client sees
+// a nil repo, which the store reads as "drop the repo_id predicate".
+func TestListShippedAllRepos(t *testing.T) {
+	stamp := time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)
+	shipped := []*model.Issue{
+		{Key: "TEST-2", Title: "ours", State: model.StateDone, TerminalAt: &stamp, Tags: []string{}},
+		{Key: "OTHR-9", Title: "theirs", State: model.StateDone, TerminalAt: &stamp, Tags: []string{}},
 	}
-	if _, err := svc.ListShipped("all", 0, "", 0); err == nil {
-		t.Error("ListShipped(\"all\") = nil, want error (per-repo only)")
+	for _, prefix := range []string{"", "all"} {
+		fake := &fakeShippedClient{repo: &model.Repo{ID: 1, Prefix: "TEST"}, shipped: shipped}
+		svc := NewBoardService(fake, "")
+		out, err := svc.ListShipped(prefix, 0, "", 0)
+		if err != nil {
+			t.Fatalf("ListShipped(%q): %v", prefix, err)
+		}
+		if len(out.Rows) != 2 {
+			t.Fatalf("ListShipped(%q) rows = %d, want 2 (both repos)", prefix, len(out.Rows))
+		}
+		if fake.lastRepo != nil {
+			t.Errorf("ListShipped(%q) passed repo %+v, want nil", prefix, fake.lastRepo)
+		}
+		if fake.prefixLookups != 0 {
+			t.Errorf("ListShipped(%q) resolved a repo %d times, want 0", prefix, fake.prefixLookups)
+		}
 	}
 }
 
@@ -465,14 +491,26 @@ func TestCountShipped(t *testing.T) {
 	}
 }
 
-// TestCountShippedRejectsAllRepos — same per-repo gate as ListShipped.
-func TestCountShippedRejectsAllRepos(t *testing.T) {
-	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}}, "")
-	if _, err := svc.CountShipped("", 0, ""); err == nil {
-		t.Error("CountShipped(\"\") = nil, want error (per-repo only)")
-	}
-	if _, err := svc.CountShipped("all", 0, ""); err == nil {
-		t.Error("CountShipped(\"all\") = nil, want error (per-repo only)")
+// TestCountShippedAllRepos (BACI-371) — same cross-repo scope as
+// ListShipped: the pill's default asks for every repo, so the client
+// must see a nil repo rather than an error.
+func TestCountShippedAllRepos(t *testing.T) {
+	for _, prefix := range []string{"", "all"} {
+		fake := &fakeShippedClient{repo: &model.Repo{ID: 1, Prefix: "TEST"}, total: 47}
+		svc := NewBoardService(fake, "")
+		n, err := svc.CountShipped(prefix, 0, "")
+		if err != nil {
+			t.Fatalf("CountShipped(%q): %v", prefix, err)
+		}
+		if n != 47 {
+			t.Errorf("CountShipped(%q) = %d, want 47", prefix, n)
+		}
+		if fake.lastCountRepo != nil {
+			t.Errorf("CountShipped(%q) passed repo %+v, want nil", prefix, fake.lastCountRepo)
+		}
+		if fake.prefixLookups != 0 {
+			t.Errorf("CountShipped(%q) resolved a repo %d times, want 0", prefix, fake.prefixLookups)
+		}
 	}
 }
 

@@ -353,26 +353,29 @@ type Client interface {
 	UnarchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	// ListShippedIssues (BACI-187) returns recently-shipped issues
 	// (state='done' AND terminal_at IS NOT NULL), newest-first by
-	// terminal_at. Per-repo only; the popover the call backs is a
-	// per-repo surface. f.RepoID is ignored here — the wrapper sets
-	// it from `repo.ID` so the call shape matches the other per-repo
-	// readers in this interface. The local backend delegates to
+	// terminal_at. f.RepoID is ignored here — the wrapper sets it from
+	// `repo` so the call shape matches the other repo-scoped readers in
+	// this interface. A nil repo (BACI-371) means every repo, which is
+	// what the Shipped pill defaults to. The local backend delegates to
 	// store.ListShippedIssues; the remote backend hits
-	// GET /repos/{prefix}/shipped (DTOs decoded back into a sparse
+	// GET /repos/{prefix}/shipped, or GET /shipped when repo is nil
+	// (DTOs decoded back into a sparse
 	// *model.Issue — pull request URLs and other DTO-side fields are
 	// not part of model.Issue and are dropped on the remote path).
 	ListShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) ([]*model.Issue, error)
 	// CountShippedIssues (BACI-221) is the sibling count read for the
-	// Pipeline Shipping-column Shipped pill. Returns the total number of
+	// Shipped pill. Returns the total number of
 	// shipped issues matching the same WHERE that ListShippedIssues
 	// applies, ignoring f.Limit (the count is total under the scope, not
-	// per-fetch). The pre-BACI-221 pill derived its count client-side
+	// per-fetch), and taking the same nil-repo-means-every-repo scope.
+	// The pre-BACI-221 pill derived its count client-side
 	// from the polled cards array, which undercounted (filtered by
 	// show_archived + per-feature board-hide) and couldn't represent
 	// "Forever"; moving
 	// the count server-side fixes both. The local backend delegates to
 	// store.CountShippedIssues; the remote backend hits
-	// GET /repos/{prefix}/shipped/count.
+	// GET /repos/{prefix}/shipped/count, or GET /shipped/count when repo
+	// is nil.
 	CountShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) (int, error)
 
 	// ----- Comments / relations / PRs / tags -----

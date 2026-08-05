@@ -1,10 +1,14 @@
 package api
 
-// BACI-187: shipping-log read endpoint. Per-repo list of recently-done
-// issues, newest-first, scoped to issues.state='done' AND
+// BACI-187: shipping-log read endpoint. List of recently-done issues,
+// newest-first, scoped to issues.state='done' AND
 // terminal_at IS NOT NULL (cancelled excluded by design; see the
-// design doc's "Out of scope" block). Drives the Pipeline Shipping
-// column's Shipped pill's popover on the desktop / web frontend.
+// design doc's "Out of scope" block). Drives the Shipped pill's
+// popover on the desktop / web frontend.
+//
+// BACI-371: two route pairs, one body each. /repos/{prefix}/shipped[/count]
+// scopes to one repo; /shipped[/count] counts and lists across every
+// repo, which is what the pill defaults to.
 
 import (
 	"net/http"
@@ -47,7 +51,8 @@ type ShippedListResponse struct {
 	Total int            `json:"total"`
 }
 
-// ShippedCountResponse is the body of GET /repos/{prefix}/shipped/count
+// ShippedCountResponse is the body of GET /shipped/count and
+// GET /repos/{prefix}/shipped/count
 // — total shipped under the current ?since= scope, polled on the same
 // 10s cadence as the leader / agents endpoints so the Pipeline
 // Shipping-column pill reflects "Forever" and includes archived /
@@ -132,8 +137,24 @@ func (d deps) handleShippedList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	d.writeShippedList(w, r, &repo.ID)
+}
+
+// handleShippedListAll (BACI-371) is the cross-repo sibling of
+// handleShippedList — GET /shipped, no {prefix} to resolve, so the
+// filter's RepoID stays nil and the store drops its repo predicate.
+// The Shipped pill defaults to this scope; the per-repo route is what
+// the popover's "this repo" narrowing asks for.
+func (d deps) handleShippedListAll(w http.ResponseWriter, r *http.Request) {
+	d.writeShippedList(w, r, nil)
+}
+
+// writeShippedList carries the body both list routes share. repoID nil
+// means "every repo" — one implementation so the per-repo and
+// cross-repo reads can't drift on limit / since / row shaping.
+func (d deps) writeShippedList(w http.ResponseWriter, r *http.Request, repoID *int64) {
 	q := r.URL.Query()
-	filter := store.ShippedFilter{RepoID: &repo.ID}
+	filter := store.ShippedFilter{RepoID: repoID}
 
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -214,13 +235,25 @@ func (d deps) handleShippedCount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	d.writeShippedCount(w, r, &repo.ID)
+}
+
+// handleShippedCountAll (BACI-371) is the cross-repo sibling of
+// handleShippedCount — GET /shipped/count, the pill's default scope.
+func (d deps) handleShippedCountAll(w http.ResponseWriter, r *http.Request) {
+	d.writeShippedCount(w, r, nil)
+}
+
+// writeShippedCount carries the body both count routes share; repoID
+// nil counts across every repo.
+func (d deps) writeShippedCount(w http.ResponseWriter, r *http.Request, repoID *int64) {
 	// useDefault=false: the pill's "Forever" scope intentionally omits
 	// ?since=, so the default 30-day cutoff would silently undercount.
 	since, ok := parseShippedSince(w, r, false)
 	if !ok {
 		return
 	}
-	filter := store.ShippedFilter{RepoID: &repo.ID, Since: since}
+	filter := store.ShippedFilter{RepoID: repoID, Since: since}
 	total, err := d.store.CountShippedIssues(filter)
 	if err != nil {
 		status, code := statusForError(err)

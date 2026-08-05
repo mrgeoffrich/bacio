@@ -537,21 +537,23 @@ func shippedSince(sinceDays int, sinceTs string) (*time.Time, error) {
 }
 
 // ListShipped (BACI-187, reshaped for BACI-221) returns the
-// recently-shipped issues for one repo (newest-first) wrapped with the
+// recently-shipped issues (newest-first) wrapped with the
 // total count under the same scope. sinceDays clamps the relative window
 // (0 = no lower bound — "Forever"); sinceTs (BACI-312) is the absolute
 // local-midnight "Today" cutoff and wins over sinceDays when non-empty;
 // limit caps the row count (0 = the popover's default 20, max 100).
-// Sibling of ListCards in shape — one repo, one trip, lean rows the
-// popover renders without follow-up fetches.
+// Sibling of ListCards in shape, repo resolution included — one repo, or
+// every repo when repoPrefix is empty or "all" (BACI-371, the popover's
+// default scope).
 func (b *BoardService) ListShipped(repoPrefix string, sinceDays int, sinceTs string, limit int) (ShippedListDTO, error) {
 	ctx := context.Background()
-	if repoPrefix == "" || repoPrefix == "all" {
-		return ShippedListDTO{}, fmt.Errorf("ListShipped: a repo is required (cross-repo popover is out of scope)")
-	}
-	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
-	if err != nil {
-		return ShippedListDTO{}, err
+	var repo *model.Repo
+	if repoPrefix != "" && repoPrefix != "all" {
+		r, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+		if err != nil {
+			return ShippedListDTO{}, err
+		}
+		repo = r
 	}
 	f := store.ShippedFilter{}
 	if limit > 0 {
@@ -588,7 +590,8 @@ func (b *BoardService) ListShipped(repoPrefix string, sinceDays int, sinceTs str
 		}
 		// First PR by insertion order — same rule as the HTTP handler.
 		// A list error is non-fatal — the row still renders without
-		// the PR chip.
+		// the PR chip. repo may be nil on the cross-repo scope; iss.Key
+		// is canonical, so it resolves without a repo context.
 		prs, perr := b.client.ListPRs(ctx, repo, iss.Key)
 		if perr == nil && len(prs) > 0 {
 			row.PRURL = prs[0].URL
@@ -607,20 +610,22 @@ func (b *BoardService) ListShipped(repoPrefix string, sinceDays int, sinceTs str
 }
 
 // CountShipped (BACI-221) returns the total number of shipped issues
-// for one repo under the active Today / Last Week / Forever scope.
+// under the active Today / Last Week / Forever scope — for one repo, or
+// across every repo when repoPrefix is empty or "all" (BACI-371).
 // Polled on the same 10s cadence as the other live read endpoints so
-// the Pipeline Shipping-column pill reflects the current scope even
+// the Shipped pill reflects the current scope even
 // when the popover isn't open. sinceDays==0 means "Forever" (no lower
 // bound on terminal_at); sinceTs (BACI-312) is the absolute
 // local-midnight "Today" cutoff and wins over sinceDays when non-empty.
 func (b *BoardService) CountShipped(repoPrefix string, sinceDays int, sinceTs string) (int, error) {
 	ctx := context.Background()
-	if repoPrefix == "" || repoPrefix == "all" {
-		return 0, fmt.Errorf("CountShipped: a repo is required (cross-repo pill is out of scope)")
-	}
-	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
-	if err != nil {
-		return 0, err
+	var repo *model.Repo
+	if repoPrefix != "" && repoPrefix != "all" {
+		r, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+		if err != nil {
+			return 0, err
+		}
+		repo = r
 	}
 	since, err := shippedSince(sinceDays, sinceTs)
 	if err != nil {

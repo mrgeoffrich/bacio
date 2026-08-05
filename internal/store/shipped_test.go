@@ -202,6 +202,81 @@ func TestListShippedIssuesNullTerminalAtSkipped(t *testing.T) {
 	}
 }
 
+// TestListShippedIssuesAllRepos (BACI-371) — a nil RepoID drops the
+// repo predicate, so rows from every repo come back interleaved by
+// terminal_at; setting RepoID still narrows to that one repo.
+func TestListShippedIssuesAllRepos(t *testing.T) {
+	s := newTestStore(t)
+	repoA, _ := s.CreateRepo("AAAA", "a", t.TempDir(), "")
+	repoB, _ := s.CreateRepo("BBBB", "b", t.TempDir(), "")
+
+	a1, _ := s.CreateIssue(repoA.ID, nil, "a-first", "", model.StateTodo, nil, "", "")
+	b1, _ := s.CreateIssue(repoB.ID, nil, "b-only", "", model.StateTodo, nil, "", "")
+	a2, _ := s.CreateIssue(repoA.ID, nil, "a-second", "", model.StateTodo, nil, "", "")
+	for _, iss := range []*model.Issue{a1, b1, a2} {
+		if err := s.SetIssueState(iss.ID, model.StateDone); err != nil {
+			t.Fatalf("ship %d: %v", iss.ID, err)
+		}
+	}
+
+	all, err := s.ListShippedIssues(ShippedFilter{})
+	if err != nil {
+		t.Fatalf("list shipped (all repos): %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("all-repos rows = %d, want 3", len(all))
+	}
+	seen := map[string]bool{}
+	for _, iss := range all {
+		seen[iss.Title] = true
+	}
+	if !seen["b-only"] {
+		t.Fatalf("all-repos list dropped the second repo's row; got %v", seen)
+	}
+
+	only, err := s.ListShippedIssues(ShippedFilter{RepoID: &repoA.ID})
+	if err != nil {
+		t.Fatalf("list shipped (repo A): %v", err)
+	}
+	if len(only) != 2 {
+		t.Fatalf("repo-A rows = %d, want 2 (predicate still narrows)", len(only))
+	}
+}
+
+// TestCountShippedIssuesAllRepos (BACI-371) — the count follows the
+// same nil-RepoID rule as the list, so the pill's default total spans
+// every repo and exceeds either repo's own count.
+func TestCountShippedIssuesAllRepos(t *testing.T) {
+	s := newTestStore(t)
+	repoA, _ := s.CreateRepo("AAAA", "a", t.TempDir(), "")
+	repoB, _ := s.CreateRepo("BBBB", "b", t.TempDir(), "")
+
+	for i := 0; i < 2; i++ {
+		iss, _ := s.CreateIssue(repoA.ID, nil, "a", "", model.StateTodo, nil, "", "")
+		_ = s.SetIssueState(iss.ID, model.StateDone)
+	}
+	iss, _ := s.CreateIssue(repoB.ID, nil, "b", "", model.StateTodo, nil, "", "")
+	_ = s.SetIssueState(iss.ID, model.StateDone)
+
+	total, err := s.CountShippedIssues(ShippedFilter{})
+	if err != nil {
+		t.Fatalf("count shipped (all repos): %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("all-repos count = %d, want 3", total)
+	}
+	onlyA, err := s.CountShippedIssues(ShippedFilter{RepoID: &repoA.ID})
+	if err != nil {
+		t.Fatalf("count shipped (repo A): %v", err)
+	}
+	if onlyA != 2 {
+		t.Fatalf("repo-A count = %d, want 2", onlyA)
+	}
+	if total <= onlyA {
+		t.Fatalf("all-repos count %d must exceed repo-A count %d", total, onlyA)
+	}
+}
+
 // TestCountShippedIssuesEmptyRepo — an empty repo returns 0, never errs.
 func TestCountShippedIssuesEmptyRepo(t *testing.T) {
 	s := newTestStore(t)
