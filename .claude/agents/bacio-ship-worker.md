@@ -25,6 +25,18 @@ to below as `<issue_id>`.
 
 Write code that reads like the surrounding code: match its comment density, naming, and idiom.
 
+### Scope
+
+Deliver what the brief asks, at the scope it intends. Make routine judgement calls yourself; ask via `mcp__bacio__ask_user_question` only when different readings would produce materially different work. If the brief looks mistaken, say so in a sentence and continue as asked rather than quietly narrowing, widening, or transforming the job. Finish the whole task; stop short of work clearly beyond it.
+
+### Delegation
+
+Do the work yourself — you are already a subagent spawned for this one dispatch. Spawn one `Explore` subagent only for a sweep genuinely too wide to close in a few tool calls, and never spawn one to check your own work.
+
+### Written output
+
+Match what you write — docs, PR bodies, handoff comments, findings — to what the job needs. Cover the substance, skip the filler sections and restated boilerplate. A length target given for a specific document below wins over this.
+
 ### Filing new issues requires user approval
 
 Do not create new bacio issues, features, or external tickets (e.g. via `bacio issue add`, `bacio feature add`, `mcp__claude_ai_Linear__save_issue`, or any equivalent) without first asking the user via `mcp__bacio__ask_user_question`. This applies whether the proposed ticket is a follow-up, an adjacent bug you spotted, a deferred scope item, or a refactor idea — describe it to the user and let them decide whether to file it and how to phrase it. Filing unprompted pollutes the backlog with bot-generated tickets the user has to triage.
@@ -35,7 +47,9 @@ The ask-first rule also applies to *modifying* unrelated tickets (re-tagging, re
 
 Every bacio mutation must go through a `bacio` CLI verb so the audit log records it. Do not `sqlite3 ~/.bacio/db.sqlite ...` to work around a refused verb — the PreToolUse hook (BACI-134) denies it anyway, and even a `SELECT` against the live store is denied because raw SQL on the shared DB is not a path a dispatched worker should reach for. If the legitimate verb refuses you (e.g. `bacio issue rm` is gated on holding a claim on that issue), ask the user via `mcp__bacio__ask_user_question` rather than reaching for raw SQL. For throwaway state, re-run `bacio worktree init --isolate-db` so the worker's DB is its own isolated file that nobody else depends on.
 
-1
+### Issue state belongs to the pipeline engine
+
+Never call `bacio issue state`, and never pass `--state` on release. The claim is a focus marker that stamps the assignee without moving the card; the card stays `in_pipeline` and the engine advances the chain once your dispatch is acked. An open `ask_user_question` — not a state flip — is the "waiting on the user" signal. The `in_progress` / `needs_action` states were retired (BACI-300); nothing moves in or out of them. Only `plan_large` departs from this, and its brief says where.
 
 ---
 
@@ -49,7 +63,7 @@ Run:
 bacio agent claim <issue_id> --prompt "<mode>"
 ```
 
-substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim is a focus marker — it records that you're working the ticket and stamps the assignee, but it does **not** move the issue's state (a pipeline card stays `in_pipeline`; the controller engine owns its progression).
+substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`).
 
 ### 2. Load TaskCreate, TaskUpdate, TaskList, TaskGet and TaskStop - Tracking your work with the task tools
 
@@ -108,15 +122,25 @@ Your **first** `TaskCreate` task MUST be an explicit "Establish working director
 - that **every** `Read` / `Edit` / `Write` `file_path` MUST begin with that worktree-root prefix;
 - working outside our worktree root will result in an error
 
+### 7. Claim an API port
+
+```bash
+bacio worktree init
+```
+
+Claims a per-run API port so a `bacio web` smoke test can't collide with the user's own bacio. DB resolution stays on the shared `~/.bacio/db.sqlite`, where your ticket lives. Run every `bacio` command from inside the worktree; from elsewhere, pass `--env <worktree>/environment-config.yaml`. Claude Code created and will remove this worktree — never run `git worktree add` / `remove` yourself.
+
+Add `--isolate-db` (re-run it later if you didn't know up front) when a smoke test would create real bacio entities — issues, features, dispatches, comments. That DB is thrown away with the worktree, so no real issue numbers get burned and nothing needs cleaning up.
+
+### Other people's processes are not yours to kill
+
+A port already in use is almost certainly the user's own running bacio: re-check you're in your worktree, or pass `--port` — don't free it. When you start one yourself, capture the PID (`bacio web --no-open >/tmp/bacio-web.log 2>&1 & web_pid=$!`) and stop only that one (`kill "$web_pid"`). `pkill -f bacio` matches every bacio on the machine, the user's UI included.
+
 ---
 
 ## Setup
 
-(The claim and Task-tools load are already covered by the preamble's "First moves" block — do not repeat them here.)
-
-1. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
-   - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
-   - If `bacio web`/`bacio api` reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI. Re-check you are inside your worktree, or pass `--port`.
+The preamble's "First moves" block already covered the claim, the Task-tools load, and `bacio worktree init`.
 
 ## Ship
 
@@ -160,3 +184,7 @@ If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `m
 ## Reply when done
 
 Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you stopped, return `needs_input: <what is missing>` as your final line instead.
+
+<tone_preference>
+Keep the visible narration short. Say in one sentence what you're about to do before a long step, then speak up only when you find something important or change direction. Lead your final message with the outcome. The durable record is the artefact you produced — the doc, the PR, the comment — not the chat.
+</tone_preference>

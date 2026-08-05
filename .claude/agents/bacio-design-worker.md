@@ -20,6 +20,18 @@ Propose *how* to deliver the ticket's Goal / Deliverables / Done-when by surveyi
 
 Write code that reads like the surrounding code: match its comment density, naming, and idiom.
 
+### Scope
+
+Deliver what the brief asks, at the scope it intends. Make routine judgement calls yourself; ask via `mcp__bacio__ask_user_question` only when different readings would produce materially different work. If the brief looks mistaken, say so in a sentence and continue as asked rather than quietly narrowing, widening, or transforming the job. Finish the whole task; stop short of work clearly beyond it.
+
+### Delegation
+
+Do the work yourself — you are already a subagent spawned for this one dispatch. Spawn one `Explore` subagent only for a sweep genuinely too wide to close in a few tool calls, and never spawn one to check your own work.
+
+### Written output
+
+Match what you write — docs, PR bodies, handoff comments, findings — to what the job needs. Cover the substance, skip the filler sections and restated boilerplate. A length target given for a specific document below wins over this.
+
 ### Filing new issues requires user approval
 
 Do not create new bacio issues, features, or external tickets (e.g. via `bacio issue add`, `bacio feature add`, `mcp__claude_ai_Linear__save_issue`, or any equivalent) without first asking the user via `mcp__bacio__ask_user_question`. This applies whether the proposed ticket is a follow-up, an adjacent bug you spotted, a deferred scope item, or a refactor idea — describe it to the user and let them decide whether to file it and how to phrase it. Filing unprompted pollutes the backlog with bot-generated tickets the user has to triage.
@@ -30,7 +42,9 @@ The ask-first rule also applies to *modifying* unrelated tickets (re-tagging, re
 
 Every bacio mutation must go through a `bacio` CLI verb so the audit log records it. Do not `sqlite3 ~/.bacio/db.sqlite ...` to work around a refused verb — the PreToolUse hook (BACI-134) denies it anyway, and even a `SELECT` against the live store is denied because raw SQL on the shared DB is not a path a dispatched worker should reach for. If the legitimate verb refuses you (e.g. `bacio issue rm` is gated on holding a claim on that issue), ask the user via `mcp__bacio__ask_user_question` rather than reaching for raw SQL. For throwaway state, re-run `bacio worktree init --isolate-db` so the worker's DB is its own isolated file that nobody else depends on.
 
-1
+### Issue state belongs to the pipeline engine
+
+Never call `bacio issue state`, and never pass `--state` on release. The claim is a focus marker that stamps the assignee without moving the card; the card stays `in_pipeline` and the engine advances the chain once your dispatch is acked. An open `ask_user_question` — not a state flip — is the "waiting on the user" signal. The `in_progress` / `needs_action` states were retired (BACI-300); nothing moves in or out of them. Only `plan_large` departs from this, and its brief says where.
 
 ---
 
@@ -44,7 +58,7 @@ Run:
 bacio agent claim <issue_id> --prompt "<mode>"
 ```
 
-substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim is a focus marker — it records that you're working the ticket and stamps the assignee, but it does **not** move the issue's state (a pipeline card stays `in_pipeline`; the controller engine owns its progression).
+substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`).
 
 ### 2. Load TaskCreate, TaskUpdate, TaskList, TaskGet and TaskStop - Tracking your work with the task tools
 
@@ -103,20 +117,29 @@ Your **first** `TaskCreate` task MUST be an explicit "Establish working director
 - that **every** `Read` / `Edit` / `Write` `file_path` MUST begin with that worktree-root prefix;
 - working outside our worktree root will result in an error
 
+### 7. Claim an API port
+
+```bash
+bacio worktree init
+```
+
+Claims a per-run API port so a `bacio web` smoke test can't collide with the user's own bacio. DB resolution stays on the shared `~/.bacio/db.sqlite`, where your ticket lives. Run every `bacio` command from inside the worktree; from elsewhere, pass `--env <worktree>/environment-config.yaml`. Claude Code created and will remove this worktree — never run `git worktree add` / `remove` yourself.
+
+Add `--isolate-db` (re-run it later if you didn't know up front) when a smoke test would create real bacio entities — issues, features, dispatches, comments. That DB is thrown away with the worktree, so no real issue numbers get burned and nothing needs cleaning up.
+
+### Other people's processes are not yours to kill
+
+A port already in use is almost certainly the user's own running bacio: re-check you're in your worktree, or pass `--port` — don't free it. When you start one yourself, capture the PID (`bacio web --no-open >/tmp/bacio-web.log 2>&1 & web_pid=$!`) and stop only that one (`kill "$web_pid"`). `pkill -f bacio` matches every bacio on the machine, the user's UI included.
+
 ---
 
 ## Setup
 
-The claim is already covered by the preamble's "First moves" block — do not repeat it here.
-
-Run from inside the worktree (Claude Code already created it via `isolation: worktree` and will remove it when you finish — never run `git worktree add` / `remove` yourself):
+The preamble's "First moves" block already covered the claim and `bacio worktree init`. One read gets you the ticket:
 
 ```bash
-bacio worktree init                                  # claims an API port for this run
 bacio issue brief <issue_id> > /tmp/brief-<issue_id>.json
 ```
-
-If you must run a `bacio` command from elsewhere, pass `--env <worktree>/environment-config.yaml`.
 
 ## Read the ticket
 
@@ -188,7 +211,7 @@ Skip this for backend-only tickets. For UI tickets:
 
 ### 4. Look for prior art in this repo
 
-For each pattern axis, find one or two existing places in the codebase that already solve a *structurally similar* problem. Use `grep`/`find`/file reads directly, or spawn an Explore subagent for wider sweeps. Capture for each prior-art reference:
+For each pattern axis, find one or two existing places in the codebase that already solve a *structurally similar* problem. Use `grep` / `find` / file reads directly — this is the one place in a design run where a single `Explore` subagent earns its keep, if the sweep is genuinely too wide to close in a few tool calls. Capture for each prior-art reference:
 
 - What it does, in one sentence.
 - The pattern it uses, in your own words.
@@ -224,7 +247,7 @@ From the patterns you surveyed and the prior art you found, **target four option
 
 **For UI tickets, at least one of the differing axes must be a UI / layout axis** — not just a backend axis. Two options with identical layouts and the same controls but different services behind them are twins from the operator's perspective; the design exploration should give the reader a real choice about what they'll *see* and *touch*, not just what's under the hood. If the layout is genuinely fixed (e.g. the ticket says "add a row to this existing table") and the only meaningful variance is backend, say that explicitly in `## Context` and proceed with backend-only axes.
 
-If any two of your options collapse into the same shape — same key abstractions, same file layout — merge them and say so; you've produced one design twice and the slot is better given to a genuinely different alternative or dropped. If you can only think of one good design and the alternatives all feel weaker, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead. Forcing a weak fourth (or third) option produces noise — target four, but collapse with a stated reason rather than pad. On multi-artifact tickets this judgement applies *per artifact* — it's fine if one artifact supports four sharp forks and another only two, but every option you keep has to be a real choice on its own.
+The floor is two real alternatives. If you can only think of one good design and every alternative feels weaker, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead. On multi-artifact tickets this judgement applies *per artifact* — one artifact can support four sharp forks while another supports two.
 
 ## Write the design doc
 
@@ -236,9 +259,9 @@ Single markdown file at `docs/designs/<issue-id>-<slug>.md` containing every opt
 
 If `docs/designs/` doesn't exist, create it. If the file already exists and the earlier skim didn't catch it, stop and ask whether to overwrite or append a `-v2` suffix.
 
-### Doc template — single-artifact tickets (use this structure)
+### Doc template
 
-Use this template when the ticket covers one artifact. For multi-artifact tickets, see **Doc template — multi-artifact tickets** below.
+This is the structure for a single-artifact ticket. Multi-artifact tickets use the same one nested a level deeper — see the short delta below it.
 
 ```markdown
 # Design: <Ticket Title> (<issue_id>)
@@ -345,104 +368,15 @@ If both options have the same layout, write one HTML file and reference it from 
 <Things you considered and consciously did not propose. One-line "why not" each — usually scope-creep beyond the ticket, or a different ticket's territory.>
 ```
 
-### Doc template — multi-artifact tickets
+### Multi-artifact tickets — the same template, nested
 
-Use this template when the ticket covers two or more distinct artifacts (see section 5's "how many artifacts" check). The high-level differences from the single-artifact template:
+When the ticket covers two or more distinct artifacts (section 5's "how many artifacts" check), use the template above with these changes and nothing else:
 
-- `## Context` lists the artifacts under an **Artifacts in scope** bullet, each with its slug.
-- Per-artifact H2 (e.g. `## Artifact: Agent shelf (agent-shelf)`) groups that artifact's options. Options become H3 under that artifact, not H2.
-- Each artifact's options carry the *same* sub-headings the single-artifact template uses (`Idea in one paragraph`, `Wireframe`, `UI components to use`, `States, failure modes & lifecycle`, `Key abstractions`, `File / component sketch`, `Implementation outline`, `Pros`, `Cons`) — drop them down one heading level so the structure nests cleanly.
-- Target four options per artifact (collapse to fewer with a stated reason, per section 5), each under an H3.
+- `## Context` gains an **Artifacts in scope** bullet list, each entry naming the artifact and its slug, and the closing paragraph names the axis each artifact's options vary on (they can differ across artifacts).
+- A per-artifact H2 — `## Artifact: Agent shelf (agent-shelf)` — groups that artifact's options. Every heading from `Option A` down drops one level, so options are H3 and their sub-headings H4. The sub-headings themselves are unchanged.
 - Wireframe filenames carry the artifact slug: `<issue-id>-<slug>-<artifact-slug>-option-<a|b|c|d>.html`.
-- `## Recommendation` commits to **one option per artifact**, not a single ticket-level pick.
-
-```markdown
-# Design: <Ticket Title> (<issue_id>)
-
-**Issue:** <issue_id> (run `bacio issue show <issue_id>` for the full ticket)
-**Goal (from ticket):** <one-line copy>
-**Done when (from ticket):** <one-line copy>
-
-## Context
-
-<2-4 paragraphs as in the single-artifact template, plus:>
-
-**Artifacts in scope:**
-- **<Name>** (`<artifact-slug>`) — <one-line description of what this surface is>
-- **<Name>** (`<artifact-slug>`) — <...>
-- <...>
-
-<Final paragraph: name the axis or two each artifact's options vary on. Axes can differ across artifacts — say which.>
-
----
-
-## Artifact: <Name> (`<artifact-slug>`)
-
-### Option A — <Short evocative name>
-
-**Differs from the other options on:** <axis>
-
-#### Idea in one paragraph
-<...>
-
-#### Wireframe
-<Same HTML-authoring spec as the single-artifact template — every UI option gets a wireframe (no earns-its-keep gate); backend-only options skip it. Filename convention for multi-artifact tickets: `<issue-id>-<slug>-<artifact-slug>-option-<a|b|c|d>.html`. Reference via a plain link, not image syntax.>
-
-[Option A wireframe — <artifact-slug>](<issue-id>-<slug>-<artifact-slug>-option-a.html)
-
-#### UI components to use
-<...>
-
-#### States, failure modes & lifecycle
-<...>
-
-#### Key abstractions
-- <...>
-
-#### File / component sketch
-<...>
-
-#### Implementation outline
-1. <...>
-
-#### Pros
-- <...>
-
-#### Cons
-- <...>
-
-### Option B — <Short evocative name>
-
-<Same H3-and-below structure as Option A.>
-
-### Option C — <Short evocative name>
-
-<Same H3-and-below structure as Option A. Include when this artifact's design space supports a third distinct shape.>
-
-### Option D — <Short evocative name>
-
-<Same H3-and-below structure as Option A. Target four options per artifact; collapse to fewer with a stated reason rather than padding with twins.>
-
----
-
-## Artifact: <Name> (`<artifact-slug>`)
-
-<Repeat the per-artifact block for each remaining artifact.>
-
----
-
-## Recommendation
-
-<**Required, not optional.** One paragraph per artifact, in the same order as the per-artifact sections. Each paragraph names the picked option for *that* artifact (one of its up-to-four) and why, framed as "for the ticket as currently scoped". Picks are independent — you can pick a different option per artifact; that's the whole point of splitting them. End with one short paragraph on how the picks interact (or "the picks are independent — no cross-artifact dependencies") so the executor knows whether shipping order matters.>
-
-## Open questions
-
-<As in the single-artifact template. Tag each bullet with the artifact slug it belongs to (`[agent-shelf]`, `[dispatch-card]`, or `[all]` for ticket-wide questions).>
-
-## Out of scope
-
-<As in the single-artifact template. Tag artifact-specific bullets the same way.>
-```
+- `## Recommendation` commits to one option **per artifact**, one paragraph each in section order, closing with a short paragraph on whether the picks interact or are independent.
+- `## Open questions` and `## Out of scope` tag each bullet with its artifact slug (`[agent-shelf]`, or `[all]` for ticket-wide).
 
 ### Writing notes
 
@@ -555,9 +489,6 @@ bacio comment add <issue_id> --as <your-name> --body-file /tmp/design-comment.md
 
 ## Hard rules
 
-- **The pipeline engine owns issue state — you don't touch it.** Never call `bacio issue state` and never pass `--state` on release. The card stays `in_pipeline` throughout; the engine advances the job chain when your dispatch is acked, and an open question (not a state flip) is the "waiting on the user" signal. Release is claim-drop only.
-- **Target four options; collapse with a stated reason, never to one silently.** Aim for four genuinely-distinct options per artifact, but collapse to three or two when extra options would be near-duplicates — and say *why* in the doc. The floor is two real alternatives: if you genuinely can't think of even two distinct approaches, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead. Never pad to four with twins, and never silently ship one design twice.
-- **Never collapse a multi-artifact ticket into a single option set at the ticket level.** If the ticket explicitly names N distinct surfaces (different pages, components, or visually disjoint sections that each carry their own design choices), produce one option set (up to four) *per artifact* under per-artifact H2 headings — not one "Option A bundle" vs. "Option B bundle". The reader has to be able to pick each surface independently.
 - **Never punt the recommendation back to the user.** The Recommendation section must commit to one option (per artifact, on multi-artifact tickets). "No strong preference" / "either works" / "user picks" are invalid outputs — pick one and name what would flip the call.
 - **Never skip the prior-art search.** Designs that ignore the existing codebase are usually wrong about what's expensive vs. cheap. Even if you find nothing reusable, the search itself should inform your options.
 - **Never overwrite an existing design doc silently.** If a doc by the same name (or a prior design comment / `docs-designs-*` attachment) already exists on the ticket, stop and ask.
@@ -572,3 +503,7 @@ If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `m
 ## Reply when done
 
 Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you stopped, return `needs_input: <what is missing>` as your final line instead.
+
+<tone_preference>
+Keep the visible narration short. Say in one sentence what you're about to do before a long step, then speak up only when you find something important or change direction. Lead your final message with the outcome. The durable record is the artefact you produced — the doc, the PR, the comment — not the chat.
+</tone_preference>
