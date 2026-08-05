@@ -413,6 +413,18 @@ export function ListNotifications(unreadOnly: boolean, limit: number): $Cancella
 }
 
 /**
+ * ListRepoActivity returns the per-repo activity summary the topbar's
+ * repository picker ranks itself by (BACI-369). One row per repo,
+ * including repos with nothing happening — the picker needs every repo
+ * in its ordering input.
+ */
+export function ListRepoActivity(): $CancellablePromise<$models.RepoActivity[]> {
+    return $Call.ByID(2158820232).then(($result: any) => {
+        return $$createType25($result);
+    });
+}
+
+/**
  * ListShipped (BACI-187, reshaped for BACI-221) returns the
  * recently-shipped issues for one repo (newest-first) wrapped with the
  * total count under the same scope. sinceDays clamps the relative window
@@ -424,7 +436,7 @@ export function ListNotifications(unreadOnly: boolean, limit: number): $Cancella
  */
 export function ListShipped(repoPrefix: string, sinceDays: number, sinceTs: string, limit: number): $CancellablePromise<$models.ShippedListDTO> {
     return $Call.ByID(3138957880, repoPrefix, sinceDays, sinceTs, limit).then(($result: any) => {
-        return $$createType24($result);
+        return $$createType26($result);
     });
 }
 
@@ -513,7 +525,7 @@ export function ResetCardProcess(repoPrefix: string, key: string): $CancellableP
  */
 export function SendSessionMessage(sessionID: string, body: string): $CancellablePromise<model$0.UserMessage | null> {
     return $Call.ByID(23283136, sessionID, body).then(($result: any) => {
-        return $$createType26($result);
+        return $$createType28($result);
     });
 }
 
@@ -683,6 +695,8 @@ const $$createType20 = $Create.Array($$createType1);
 const $$createType21 = $models.BoardColumn.createFrom;
 const $$createType22 = $Create.Array($$createType21);
 const $$createType23 = $Create.Array($$createType16);
-const $$createType24 = $models.ShippedListDTO.createFrom;
-const $$createType25 = model$0.UserMessage.createFrom;
-const $$createType26 = $Create.Nullable($$createType25);
+const $$createType24 = $models.RepoActivity.createFrom;
+const $$createType25 = $Create.Array($$createType24);
+const $$createType26 = $models.ShippedListDTO.createFrom;
+const $$createType27 = model$0.UserMessage.createFrom;
+const $$createType28 = $Create.Nullable($$createType27);

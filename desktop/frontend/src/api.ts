@@ -22,6 +22,7 @@ export * from './api/sync';
 // `*DTO` aliases) are all kept so component imports don't change.
 export type {
   Board,
+  RepoActivity,
   BoardColumn,
   BoardCard,
   BoardCardTodo,

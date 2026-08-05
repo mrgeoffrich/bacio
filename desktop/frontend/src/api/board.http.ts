@@ -4,11 +4,13 @@
 import { call, WebModeUnavailableError } from './client.http';
 import { STATE_LABELS } from './wire/common';
 import { reshapeHistoryEntry } from './wire/history';
+import { reshapeRepoActivity } from './wire/repo';
 import { boardWithSync } from './wire/sync';
 import type { ApiIssue } from './wire/issue';
 import type { ApiHistoryEntry } from './wire/history';
+import type { ApiRepoActivity } from './wire/repo';
 import type { ApiRepo, SyncStatusApi } from './wire/sync';
-import type { Board, BoardColumn, BoardCard, HistoryPage, AddRepositoryPayload } from './contract';
+import type { Board, BoardColumn, BoardCard, RepoActivity, HistoryPage, AddRepositoryPayload } from './contract';
 
 export async function listBoards(): Promise<Board[]> {
   // GET /repos returns the bare repo rows; the desktop's Board carries
@@ -31,6 +33,13 @@ export async function listBoards(): Promise<Board[]> {
     boards.push(boardWithSync(r.prefix, r.name, issues.length, syncByPrefix.get(r.prefix)));
   }
   return boards;
+}
+
+// listRepoActivity mirrors the Wails seam's call over GET /repos/activity
+// (BACI-369) — one query server-side, snake→camel here.
+export async function listRepoActivity(): Promise<RepoActivity[]> {
+  const rows = await call<ApiRepoActivity[]>('/repos/activity');
+  return rows.map(reshapeRepoActivity);
 }
 
 export async function listColumns(): Promise<BoardColumn[]> {

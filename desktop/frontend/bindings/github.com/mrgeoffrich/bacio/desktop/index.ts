@@ -63,6 +63,7 @@ export {
     RelationsDTO,
     RenameEntryDTO,
     RenumberEntryDTO,
+    RepoActivity,
     RepoLinkResultDTO,
     SetupSyncIn,
     ShippedIssueDTO,
