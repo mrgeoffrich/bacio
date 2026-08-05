@@ -3680,6 +3680,22 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-shipped-scope-button:focus-visible {
   outline: 1px dotted var(--border-focus); outline-offset: 1px;
 }
+.mk-shipped-scope-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.mk-shipped-scope-button:disabled:hover {
+  background: transparent;
+  color: var(--fg-2);
+}
+/* BACI-371: the repo-scope strip stacks directly above the time-scope
+   strip. Dropping its bottom border and tightening the gap between the
+   two keeps them reading as one header block rather than two stacked
+   headers with a rule through the middle. */
+.mk-shipped-scope-strip.is-repo-scope {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
 
 .mk-shipped-popover-body {
   flex: 1 1 auto;

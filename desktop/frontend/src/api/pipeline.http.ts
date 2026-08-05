@@ -199,6 +199,16 @@ export async function getImpactPrimary(repoPrefix: string): Promise<boolean> {
   return !!out.impact_primary;
 }
 
+// shippedBase (BACI-371) picks the route pair the scope asks for: an
+// empty / 'all' prefix is the cross-repo default and hits the
+// root-level /shipped[/count] routes; a real prefix narrows to that
+// repo. Mirrors BoardService.ListShipped's repo resolution on the
+// Wails side so the two transports agree on what 'all' means.
+function shippedBase(repoPrefix: string): string {
+  if (!repoPrefix || repoPrefix === 'all') return '/shipped';
+  return `/repos/${repoPrefix}/shipped`;
+}
+
 // listShippedIssues (BACI-187, reshaped for BACI-221) is the HTTP
 // twin of api.ts's listShippedIssues. Keep the parameter list and
 // return type in lockstep with the desktop binding — the React-side
@@ -213,14 +223,11 @@ export async function listShippedIssues(
   sinceTs: string,
   limit: number,
 ): Promise<ShippedListDTO> {
-  if (!repoPrefix || repoPrefix === 'all') {
-    throw new Error('select a repository to view its shipping log');
-  }
   const query: Record<string, string | number> = {};
   if (sinceTs) query.since_ts = sinceTs;
   else if (sinceDays > 0) query.since = `${sinceDays}d`;
   if (limit > 0) query.limit = limit;
-  const body = await call<ShippedListDTO>(`/repos/${repoPrefix}/shipped`, { query });
+  const body = await call<ShippedListDTO>(shippedBase(repoPrefix), { query });
   // Defensive defaults: the server always returns the wrapper, but on
   // an oddball 204 the call helper hands us undefined. Treat it as an
   // empty list with zero total so the popover's "showing N of TOTAL"
@@ -238,12 +245,9 @@ export async function countShippedIssues(
   sinceDays: number,
   sinceTs: string,
 ): Promise<number> {
-  if (!repoPrefix || repoPrefix === 'all') {
-    throw new Error('select a repository to view its shipping count');
-  }
   const query: Record<string, string | number> = {};
   if (sinceTs) query.since_ts = sinceTs;
   else if (sinceDays > 0) query.since = `${sinceDays}d`;
-  const body = await call<{ total: number }>(`/repos/${repoPrefix}/shipped/count`, { query });
+  const body = await call<{ total: number }>(`${shippedBase(repoPrefix)}/count`, { query });
   return body?.total ?? 0;
 }

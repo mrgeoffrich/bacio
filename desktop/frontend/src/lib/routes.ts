@@ -42,6 +42,16 @@ export function issuePath(prefix: string, key: string): string {
   return `/${prefix}/issues/${key}`;
 }
 
+// repoPrefixFromKey pulls the repo prefix out of a canonical issue key
+// ("BACI-100" → "BACI"). BACI-371: the Shipped popover can now list
+// rows from other repos, so a deep-link must route under the key's own
+// prefix rather than whichever board happens to be open. Returns '' for
+// anything that isn't PREFIX-N, leaving the caller to fall back.
+export function repoPrefixFromKey(key: string): string {
+  const match = /^([A-Za-z0-9]+)-\d+$/.exec(key ?? '');
+  return match ? match[1] : '';
+}
+
 // processEditPath maps an issue key onto the BACI-294 full-screen Edit
 // Process route under the active repo prefix — the editor for an
 // in_pipeline card's job chain (`/<prefix>/pipeline/<key>/process`).

@@ -3,8 +3,15 @@ import { reportError } from '../errors';
 import * as api from '../api';
 import type { ShippedIssueDTO } from '../api';
 import { formatWhen } from '../lib/formatWhen';
-import { SHIPPED_SCOPES, scopeLabel, scopeSinceParams } from './shippedScope.ts';
-import type { ShippedScope } from './shippedScope.ts';
+import {
+  SHIPPED_SCOPES,
+  SHIPPED_REPO_SCOPES,
+  scopeLabel,
+  scopeSinceParams,
+  repoScopeLabel,
+  shippedPrefix,
+} from './shippedScope.ts';
+import type { ShippedScope, ShippedRepoScope } from './shippedScope.ts';
 import ShippedPill from './ShippedPill';
 
 // CACHE_TTL_MS: how long the popover holds onto its last successful
@@ -24,16 +31,24 @@ const LIMIT = 20;
 // and keeps the dep footprint flat.
 //
 // Props:
-//   activeBoard  — current repo prefix; empty / "all" disables the pill.
+//   activeBoard  — current repo prefix; "" / "all" when no concrete
+//                  board is open. Only the repo-scope strip's narrowing
+//                  button depends on it — the pill itself always counts
+//                  something (BACI-371).
 //   shippedCount — pre-computed count for the "Shipped · N" label;
-//                  App.tsx polls /shipped/count under the active scope
-//                  on the same 10s cadence as the other live readouts
-//                  so pill and popover never drift.
+//                  CardsProvider polls the count endpoint under the
+//                  active scopes on the same 10s cadence as the other
+//                  live readouts so pill and popover never drift.
 //   scope        — BACI-221: 'today' | 'week' | 'forever'. Owned by
-//                  App.tsx so the pill count and the list scope stay
-//                  in lockstep.
-//   onScopeChange — App-level setter that also persists the choice to
-//                  localStorage. Wired through PipelineView.
+//                  CardsProvider so the pill count and the list scope
+//                  stay in lockstep.
+//   onScopeChange — provider-level setter that also persists the choice
+//                  to localStorage.
+//   repoScope    — BACI-371: 'all' | 'repo', the second scope axis.
+//                  'all' (the default) totals every repo; 'repo'
+//                  narrows to activeBoard. Owned by CardsProvider for
+//                  the same no-drift reason as the time window.
+//   onRepoScopeChange — provider-level setter, persisted the same way.
 //   timezone     — BACI-312: the user's IANA zone (or "" before
 //                  auto-detect fills it). Drives the 'today' scope's
 //                  local-midnight cutoff via scopeSinceParams.
@@ -65,6 +80,8 @@ type ShippedPopoverProps = {
   shippedCount: number | null;
   scope: ShippedScope;
   onScopeChange: (next: ShippedScope) => void;
+  repoScope: ShippedRepoScope;
+  onRepoScopeChange: (next: ShippedRepoScope) => void;
   timezone: string;
   onOpenIssue: (key: string) => void;
   flyingShipKey: string | null;
@@ -72,7 +89,7 @@ type ShippedPopoverProps = {
   onShipFlightDone: () => void;
 };
 
-export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, timezone, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }: ShippedPopoverProps) {
+export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, repoScope, onRepoScopeChange, timezone, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }: ShippedPopoverProps) {
   const [open, setOpen] = useState(false);
   // status: 'idle' | 'loading' | 'ready' | 'error'
   // rows is the last successful fetch (preserved across closes so the
@@ -104,25 +121,30 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
     };
   }, [open]);
 
-  // Switching repos OR switching scopes OR changing the timezone (which
-  // moves the 'today' midnight cutoff) invalidates the cache — the
-  // popover must refetch under the new conditions rather than show
-  // stale rows. Same shape as the existing activeBoard invalidation
-  // effect; scope + timezone are just further axes the cache depends on.
+  // effectivePrefix (BACI-371) folds the repo scope and the active board
+  // into the one prefix the fetch takes — 'all' for the cross-repo
+  // default (and for a 'repo' scope with no board open).
+  const effectivePrefix = shippedPrefix(repoScope, activeBoard);
+
+  // Switching the effective prefix OR the time scope OR the timezone
+  // (which moves the 'today' midnight cutoff) invalidates the cache —
+  // the popover must refetch under the new conditions rather than show
+  // stale rows. Keying on effectivePrefix rather than activeBoard means
+  // a board switch while in all-repos scope correctly leaves the cache
+  // alone; the rows didn't change.
   useEffect(() => {
     setStatus('idle');
     setRows([]);
     setTotal(0);
     setError('');
     setFetchedAt(0);
-  }, [activeBoard, scope, timezone]);
+  }, [effectivePrefix, scope, timezone]);
 
   // First-open (or cache-expired) fetch. Runs only when we just
   // opened — closing the popover preserves the rows so a fast
   // re-open paints from cache.
   useEffect(() => {
     if (!open) return;
-    if (!activeBoard || activeBoard === 'all') return;
     const fresh = Date.now() - fetchedAt < CACHE_TTL_MS;
     if (status === 'ready' && fresh) return;
     let cancelled = false;
@@ -131,7 +153,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
     // BACI-312: 'today' resolves to an absolute local-midnight cutoff in
     // the user's timezone; week/forever keep the relative sinceDays window.
     const { sinceDays, sinceTs } = scopeSinceParams(scope, timezone);
-    api.listShippedIssues(activeBoard, sinceDays, sinceTs, LIMIT)
+    api.listShippedIssues(effectivePrefix, sinceDays, sinceTs, LIMIT)
       .then((next) => {
         if (cancelled) return;
         setRows(next?.rows ?? []);
@@ -150,7 +172,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
         setStatus('error');
       });
     return () => { cancelled = true; };
-  }, [open, activeBoard, scope, timezone, status, fetchedAt]);
+  }, [open, effectivePrefix, scope, timezone, status, fetchedAt]);
 
   // Click a row → open the issue workspace + close the popover.
   const pickRow = (key: string) => {
@@ -165,31 +187,46 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
     setStatus('idle');
   };
 
-  // Scope click: defer to the App-level setter (which also persists),
-  // then drop the cache so the open-effect re-fires immediately.
+  // Scope click: defer to the provider-level setter (which also
+  // persists), then drop the cache so the open-effect re-fires immediately.
   const pickScope = (next: ShippedScope) => {
     if (next === scope) return;
     if (typeof onScopeChange === 'function') onScopeChange(next);
-    // The activeBoard/scope effect above resets cache state on
+    // The prefix/scope effect above resets cache state on
     // scope change, but we set it here too so a click while open
     // re-fetches without a race against the parent re-render.
     setStatus('idle');
     setFetchedAt(0);
   };
 
-  const disabled = !activeBoard || activeBoard === 'all';
+  // Repo-scope click: same contract as pickScope, on the other axis.
+  const pickRepoScope = (next: ShippedRepoScope) => {
+    if (next === repoScope) return;
+    if (typeof onRepoScopeChange === 'function') onRepoScopeChange(next);
+    setStatus('idle');
+    setFetchedAt(0);
+  };
+
   const safeCount = shippedCount != null && Number.isFinite(shippedCount) && shippedCount > 0 ? shippedCount : 0;
+  // BACI-371: the tooltip names the repo scope, because the same number
+  // means two different things depending on which strip button is lit.
+  const scopeSuffix = effectivePrefix === 'all' ? 'across all repositories' : `in ${effectivePrefix}`;
   const tooltip = safeCount > 0
-    ? `${safeCount} ${safeCount === 1 ? 'issue' : 'issues'} shipped · click for the full list`
-    : 'Recently-shipped issues for this repository';
+    ? `${safeCount} ${safeCount === 1 ? 'issue' : 'issues'} shipped ${scopeSuffix} · click for the full list`
+    : `Recently-shipped issues ${scopeSuffix}`;
   const safeScope = scope ?? 'week';
+  // The narrowing button needs a board to narrow to; with none open,
+  // 'all' is the only reachable scope — and the strip lights 'All repos'
+  // to match what the list actually shows, without clobbering the
+  // persisted preference (it lights up again once a board is open).
+  const repoScopeDisabled = !activeBoard || activeBoard === 'all';
+  const safeRepoScope = repoScopeDisabled ? 'all' : (repoScope ?? 'all');
 
   return (
     <div className="mk-shipped-popover-root" ref={rootRef}>
       <ShippedPill
         count={safeCount}
-        disabled={disabled}
-        onClick={() => { if (!disabled) setOpen(o => !o); }}
+        onClick={() => setOpen(o => !o)}
         flashing={shipFlashing}
         flyingKey={flyingShipKey}
         onFlightDone={onShipFlightDone}
@@ -202,7 +239,32 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
           {/* BACI-244: the "Recently shipped" header strip was removed —
               the trigger pill ("Shipped · N") already labels the
               popover, so the inner header was duplicative chrome.
-              BACI-221 scope picker: segmented strip of Today / Last
+              BACI-371 repo picker: the repo axis stacks above the time
+              axis, same segmented-strip vocabulary, so the two
+              orthogonal scopes read as one header block rather than
+              getting conflated into a single four-chip tablist. The
+              narrowing button wears the active board's prefix, and is
+              disabled when there's no board to narrow to. */}
+          <div className="mk-shipped-scope-strip is-repo-scope" role="tablist" aria-label="Shipped repo scope">
+            {SHIPPED_REPO_SCOPES.map((s) => {
+              const buttonDisabled = s === 'repo' && repoScopeDisabled;
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  role="tab"
+                  aria-selected={safeRepoScope === s}
+                  disabled={buttonDisabled}
+                  title={buttonDisabled ? 'Open a repository to narrow the list to it' : undefined}
+                  className={`mk-shipped-scope-button${safeRepoScope === s ? ' is-active' : ''}`}
+                  onClick={() => pickRepoScope(s)}
+                >
+                  {repoScopeLabel(s, activeBoard)}
+                </button>
+              );
+            })}
+          </div>
+          {/* BACI-221 scope picker: segmented strip of Today / Last
               Week / Forever buttons. Renders above the body so the
               picker is one tab-stop above the rows. */}
           <div className="mk-shipped-scope-strip" role="tablist" aria-label="Shipped time scope">
@@ -249,7 +311,9 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
             )}
             {status === 'ready' && rows.length === 0 && (
               <div className="mk-shipped-popover-empty">
-                Nothing shipped in this window — try a wider scope.
+                {effectivePrefix === 'all'
+                  ? 'Nothing shipped in this window — try a wider scope.'
+                  : `Nothing shipped in ${effectivePrefix} in this window — try a wider scope, or all repos.`}
               </div>
             )}
             {status === 'ready' && rows.length > 0 && rows.map((r) => (

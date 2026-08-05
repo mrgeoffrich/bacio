@@ -11,11 +11,23 @@
 // live value through useLocalStorage with this codec; the read/persist pair
 // below is the equivalent non-React accessor.
 
-import { isShippedScope, type ShippedScope } from './shippedScope.ts';
+import {
+  isShippedScope,
+  isShippedRepoScope,
+  type ShippedScope,
+  type ShippedRepoScope,
+} from './shippedScope.ts';
 import { readLocalStorage, writeLocalStorage, type LocalStorageCodec } from '../lib/hooks/useLocalStorage.ts';
 
 export const STORAGE_KEY = 'bacio-shipped-scope';
 export const DEFAULT_SCOPE: ShippedScope = 'week';
+
+// BACI-371's repo axis persists on its own key with the same recipe —
+// a separate key rather than a compound value so an existing
+// bacio-shipped-scope entry keeps deserialising unchanged. Default is
+// 'all': the counter totals across repos unless the user narrows it.
+export const REPO_SCOPE_STORAGE_KEY = 'bacio-shipped-repo-scope';
+export const DEFAULT_REPO_SCOPE: ShippedRepoScope = 'all';
 
 // The scope is its own on-disk string; deserialize just rejects a legacy /
 // hand-edited value that isn't one of the three canonical scopes.
@@ -31,4 +43,20 @@ export function readShippedScope(): ShippedScope {
 
 export function persistShippedScope(scope: ShippedScope): void {
   writeLocalStorage(STORAGE_KEY, shippedScopeCodec.serialize(scope));
+}
+
+// shippedRepoScopeCodec is the repo axis's twin of shippedScopeCodec —
+// same shape, its own guard and default.
+export const shippedRepoScopeCodec: LocalStorageCodec<ShippedRepoScope> = {
+  serialize: (scope) => scope,
+  deserialize: (raw) => (isShippedRepoScope(raw) ? raw : DEFAULT_REPO_SCOPE),
+};
+
+export function readShippedRepoScope(): ShippedRepoScope {
+  const raw = readLocalStorage(REPO_SCOPE_STORAGE_KEY);
+  return raw === null ? DEFAULT_REPO_SCOPE : shippedRepoScopeCodec.deserialize(raw);
+}
+
+export function persistShippedRepoScope(scope: ShippedRepoScope): void {
+  writeLocalStorage(REPO_SCOPE_STORAGE_KEY, shippedRepoScopeCodec.serialize(scope));
 }

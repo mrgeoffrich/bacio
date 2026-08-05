@@ -5,7 +5,7 @@ import * as api from '../api';
 import type { Board, BoardColumn, BoardCard, AddRepositoryPayload } from '../api';
 import { reportError } from '../errors';
 import { readLocalStorage, writeLocalStorage } from '../lib/hooks/useLocalStorage';
-import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath } from '../lib/routes';
+import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath, repoPrefixFromKey } from '../lib/routes';
 
 // RepoProvider (BACI-361) owns the repo-selection layer App.tsx used to
 // carry: the boards/columns list, the BACI-285 URL-derived active repo and
@@ -157,9 +157,14 @@ export function RepoProvider({ children }: { children: ReactNode }) {
 
   // BACI-203: navigate-by-key for prev/next sibling jumps, the kanban
   // blocked-popover link, and the Shipped pill / notification deep-links.
+  // BACI-371: route under the key's own prefix, not the active board —
+  // the Shipped popover's cross-repo scope hands us keys from other
+  // repos, and opening those under the current prefix would 404. A key
+  // that doesn't parse falls back to the active board (the pre-BACI-371
+  // behaviour), same as useNotifications' already-cross-repo deep-link.
   const openIssue = useCallback((key: string) => {
     if (!key) return;
-    navigate(issuePath(activeBoard, key));
+    navigate(issuePath(repoPrefixFromKey(key) || activeBoard, key));
   }, [navigate, activeBoard]);
 
   // Open a card's workspace by routing to /issues/:key. Settings dismissal

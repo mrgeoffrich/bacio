@@ -161,9 +161,10 @@ export function ClearDefaultFeature(repoPrefix: string): $CancellablePromise<$mo
 
 /**
  * CountShipped (BACI-221) returns the total number of shipped issues
- * for one repo under the active Today / Last Week / Forever scope.
+ * under the active Today / Last Week / Forever scope — for one repo, or
+ * across every repo when repoPrefix is empty or "all" (BACI-371).
  * Polled on the same 10s cadence as the other live read endpoints so
- * the Pipeline Shipping-column pill reflects the current scope even
+ * the Shipped pill reflects the current scope even
  * when the popover isn't open. sinceDays==0 means "Forever" (no lower
  * bound on terminal_at); sinceTs (BACI-312) is the absolute
  * local-midnight "Today" cutoff and wins over sinceDays when non-empty.
@@ -414,13 +415,14 @@ export function ListNotifications(unreadOnly: boolean, limit: number): $Cancella
 
 /**
  * ListShipped (BACI-187, reshaped for BACI-221) returns the
- * recently-shipped issues for one repo (newest-first) wrapped with the
+ * recently-shipped issues (newest-first) wrapped with the
  * total count under the same scope. sinceDays clamps the relative window
  * (0 = no lower bound — "Forever"); sinceTs (BACI-312) is the absolute
  * local-midnight "Today" cutoff and wins over sinceDays when non-empty;
  * limit caps the row count (0 = the popover's default 20, max 100).
- * Sibling of ListCards in shape — one repo, one trip, lean rows the
- * popover renders without follow-up fetches.
+ * Sibling of ListCards in shape, repo resolution included — one repo, or
+ * every repo when repoPrefix is empty or "all" (BACI-371, the popover's
+ * default scope).
  */
 export function ListShipped(repoPrefix: string, sinceDays: number, sinceTs: string, limit: number): $CancellablePromise<$models.ShippedListDTO> {
     return $Call.ByID(3138957880, repoPrefix, sinceDays, sinceTs, limit).then(($result: any) => {
