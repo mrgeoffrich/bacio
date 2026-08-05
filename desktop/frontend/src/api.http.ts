@@ -22,6 +22,7 @@ export { WebModeUnavailableError } from './api/client.http';
 // (BACI-359). Mirrors the api.ts barrel's contract re-export.
 export type {
   Board,
+  RepoActivity,
   SyncRegistry,
   SyncRegistryDTO,
   SyncRepoEntry,

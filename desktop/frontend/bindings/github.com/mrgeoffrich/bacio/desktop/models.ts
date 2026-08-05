@@ -2089,6 +2089,38 @@ export class RenumberEntryDTO {
 }
 
 /**
+ * RepoActivity (BACI-369) is one repo's activity summary for the topbar
+ * picker's ordering: when anything last happened in it, and how many
+ * agent jobs it has running right now. Deliberately separate from Board
+ * — Board is loaded once at mount, this is polled on the shared cadence.
+ */
+export class RepoActivity {
+    "prefix": string;
+    "lastActivityAt"?: time$0.Time | null;
+    "activeJobs": number;
+
+    /** Creates a new RepoActivity instance. */
+    constructor($$source: Partial<RepoActivity> = {}) {
+        if (!("prefix" in $$source)) {
+            this["prefix"] = "";
+        }
+        if (!("activeJobs" in $$source)) {
+            this["activeJobs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RepoActivity instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RepoActivity {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RepoActivity($$parsedSource as Partial<RepoActivity>);
+    }
+}
+
+/**
  * RepoLinkResultDTO is the camelCase Wails-side outcome of
  * LinkPhantomRepo (BACI-112). Mirrors client.RepoLinkResult — the
  * upgraded repo row plus the URL of the sync repo whose

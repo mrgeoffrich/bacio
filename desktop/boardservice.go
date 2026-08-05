@@ -51,6 +51,16 @@ type Board struct {
 	SyncLastError  string     `json:"syncLastError,omitempty"`
 }
 
+// RepoActivity (BACI-369) is one repo's activity summary for the topbar
+// picker's ordering: when anything last happened in it, and how many
+// agent jobs it has running right now. Deliberately separate from Board
+// — Board is loaded once at mount, this is polled on the shared cadence.
+type RepoActivity struct {
+	Prefix         string     `json:"prefix"`
+	LastActivityAt *time.Time `json:"lastActivityAt,omitempty"`
+	ActiveJobs     int        `json:"activeJobs"`
+}
+
 // BoardColumn is one kanban column — one bacio issue state.
 type BoardColumn struct {
 	State string `json:"state"`
@@ -421,6 +431,27 @@ func boardWithSync(r *model.Repo, issueCount int, st client.SyncStatus) Board {
 		bd.SyncLastError = *st.LastError
 	}
 	return bd
+}
+
+// ListRepoActivity returns the per-repo activity summary the topbar's
+// repository picker ranks itself by (BACI-369). One row per repo,
+// including repos with nothing happening — the picker needs every repo
+// in its ordering input.
+func (b *BoardService) ListRepoActivity() ([]RepoActivity, error) {
+	ctx := context.Background()
+	rows, err := b.client.RepoActivities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RepoActivity, 0, len(rows))
+	for _, a := range rows {
+		out = append(out, RepoActivity{
+			Prefix:         a.Prefix,
+			LastActivityAt: a.LastActivityAt,
+			ActiveJobs:     a.ActiveJobs,
+		})
+	}
+	return out, nil
 }
 
 // AddRepository opens a native folder picker and registers the chosen git

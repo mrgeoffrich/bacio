@@ -1,11 +1,22 @@
 // Board-domain Wails calls (BACI-359): repos, columns, cards, history.
 import { BoardService, HistoryService } from '../../bindings/github.com/mrgeoffrich/bacio/desktop';
-import type { Board, BoardColumn, BoardCard, AddRepositoryPayload, HistoryPage } from './contract';
+import type { Board, BoardColumn, BoardCard, RepoActivity, AddRepositoryPayload, HistoryPage } from './contract';
 import { normalize } from './normalize';
 
 export async function listBoards(): Promise<Board[]> {
   try {
     return await BoardService.ListBoards();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// listRepoActivity returns the per-repo activity summary the topbar
+// picker ranks itself by (BACI-369). Polled, so it stays off the Board
+// payload.
+export async function listRepoActivity(): Promise<RepoActivity[]> {
+  try {
+    return await BoardService.ListRepoActivity();
   } catch (err) {
     throw normalize(err);
   }

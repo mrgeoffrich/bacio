@@ -39,6 +39,17 @@ export interface Board {
   syncLastError?: string;
 }
 
+// RepoActivity (BACI-369) is one repo's activity summary, polled by the
+// topbar's repository picker to rank its rows. Deliberately separate
+// from Board: Board is loaded once at mount, this is polled on the
+// shared 10s cadence. lastActivityAt is absent for a repo nothing has
+// happened in yet — those sort last.
+export interface RepoActivity {
+  prefix: string;
+  lastActivityAt?: string;
+  activeJobs: number;
+}
+
 export interface BoardColumn {
   state: string;
   label: string;
