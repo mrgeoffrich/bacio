@@ -231,7 +231,7 @@ func TestListCardsTaken(t *testing.T) {
 				repo:   &model.Repo{Prefix: "TEST"},
 				issues: issues,
 				claims: c.claims,
-			})
+			}, "")
 			cards, err := svc.ListCards("TEST")
 			if err != nil {
 				t.Fatalf("ListCards: %v", err)
@@ -268,7 +268,7 @@ func TestListAgentsBusy(t *testing.T) {
 		sessions:   []*model.AgentSession{sess},
 		dispatches: nil,
 		sessClaims: map[string][]*model.AgentClaim{"sess-a": {claim}},
-	})
+	}, "")
 	cards, err := svc.ListAgents("TEST")
 	if err != nil {
 		t.Fatalf("ListAgents: %v", err)
@@ -363,7 +363,7 @@ func TestListShipped(t *testing.T) {
 		},
 	}
 	fake := &fakeShippedClient{repo: repo, shipped: shipped, prs: prs}
-	svc := NewBoardService(fake)
+	svc := NewBoardService(fake, "")
 
 	out, err := svc.ListShipped("TEST", 30, "", 20)
 	if err != nil {
@@ -396,7 +396,7 @@ func TestListShipped(t *testing.T) {
 // TestListShippedRejectsAllRepos — the popover is per-repo by design;
 // calling ListShipped with "" or "all" must surface a clear error.
 func TestListShippedRejectsAllRepos(t *testing.T) {
-	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}})
+	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}}, "")
 	if _, err := svc.ListShipped("", 0, "", 0); err == nil {
 		t.Error("ListShipped(\"\") = nil, want error (per-repo only)")
 	}
@@ -415,7 +415,7 @@ func TestListShippedReturnsTotal(t *testing.T) {
 		{Key: "TEST-1", Title: "row", State: model.StateDone, TerminalAt: &stamp},
 	}
 	fake := &fakeShippedClient{repo: repo, shipped: shipped, total: 47}
-	svc := NewBoardService(fake)
+	svc := NewBoardService(fake, "")
 
 	out, err := svc.ListShipped("TEST", 7, "", 20)
 	if err != nil {
@@ -435,7 +435,7 @@ func TestListShippedReturnsTotal(t *testing.T) {
 // older rows on a slow clock.
 func TestListShippedForeverPassesNilSince(t *testing.T) {
 	fake := &fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}}
-	svc := NewBoardService(fake)
+	svc := NewBoardService(fake, "")
 	if _, err := svc.ListShipped("TEST", 0, "", 0); err != nil {
 		t.Fatalf("ListShipped: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestListShippedForeverPassesNilSince(t *testing.T) {
 // to the client and returns the count verbatim.
 func TestCountShipped(t *testing.T) {
 	fake := &fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}, total: 17}
-	svc := NewBoardService(fake)
+	svc := NewBoardService(fake, "")
 
 	total, err := svc.CountShipped("TEST", 7, "")
 	if err != nil {
@@ -467,7 +467,7 @@ func TestCountShipped(t *testing.T) {
 
 // TestCountShippedRejectsAllRepos — same per-repo gate as ListShipped.
 func TestCountShippedRejectsAllRepos(t *testing.T) {
-	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}})
+	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}}, "")
 	if _, err := svc.CountShipped("", 0, ""); err == nil {
 		t.Error("CountShipped(\"\") = nil, want error (per-repo only)")
 	}
@@ -483,7 +483,7 @@ func TestCountShippedRejectsAllRepos(t *testing.T) {
 // absolute, so the desktop transport must forward it verbatim.
 func TestShippedSinceTSWinsOverSinceDays(t *testing.T) {
 	fake := &fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}}
-	svc := NewBoardService(fake)
+	svc := NewBoardService(fake, "")
 
 	want := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
 	sinceTs := want.Format(time.RFC3339)
@@ -514,7 +514,7 @@ func TestBoardService_AddIssue(t *testing.T) {
 	svc := NewBoardService(&fakeBoardClient{
 		repo:   &model.Repo{Prefix: "TEST"},
 		issues: nil,
-	})
+	}, "")
 
 	card, err := svc.AddIssue("TEST", "Login broken on Safari", "500 on submit", "")
 	if err != nil {
@@ -542,7 +542,7 @@ func TestBoardService_AddIssue(t *testing.T) {
 // concept of "which repo do I create in", so AddIssue must reject empty
 // and "all" prefixes with a clear error.
 func TestBoardService_AddIssueRejectsAllRepos(t *testing.T) {
-	svc := NewBoardService(&fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}})
+	svc := NewBoardService(&fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}}, "")
 	if _, err := svc.AddIssue("", "t", "", ""); err == nil {
 		t.Error("AddIssue(\"\") = nil, want error (cross-repo not supported)")
 	}
@@ -577,7 +577,7 @@ func (f *fakeDefaultFeatureClient) ClearDefaultFeature(context.Context, *model.R
 // verb. Slim DTO shape carries slug + title + emoji for the dropdown.
 func TestBoardService_DefaultFeature_RoundTrip(t *testing.T) {
 	fake := &fakeDefaultFeatureClient{fakeBoardClient: fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}}}
-	svc := NewBoardService(fake)
+	svc := NewBoardService(fake, "")
 
 	// Unset → empty DTO.
 	got, err := svc.GetDefaultFeature("TEST")
@@ -642,7 +642,7 @@ func (f *fakeResetClient) ResetIssueProcess(_ context.Context, _ *model.Repo, ke
 // false (the UI never dry-runs), returning the refreshed empty chain.
 func TestBoardService_ResetCardProcess_Delegates(t *testing.T) {
 	fake := &fakeResetClient{fakeBoardClient: fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}}}
-	svc := NewBoardService(fake)
+	svc := NewBoardService(fake, "")
 
 	jobs, err := svc.ResetCardProcess("TEST", "TEST-1")
 	if err != nil {
@@ -656,5 +656,24 @@ func TestBoardService_ResetCardProcess_Delegates(t *testing.T) {
 	}
 	if len(jobs) != 0 {
 		t.Fatalf("chain = %d jobs, want empty", len(jobs))
+	}
+}
+
+// TestBoardService_LaunchRepo returns the prefix main() resolved from
+// the launch cwd, and "" when the app wasn't started inside a repo
+// (BACI-368).
+func TestBoardService_LaunchRepo(t *testing.T) {
+	svc := NewBoardService(&fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}}, "TEST")
+	got, err := svc.LaunchRepo()
+	if err != nil {
+		t.Fatalf("LaunchRepo: %v", err)
+	}
+	if got != "TEST" {
+		t.Fatalf("LaunchRepo = %q, want TEST", got)
+	}
+
+	svc = NewBoardService(&fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}}, "")
+	if got, err = svc.LaunchRepo(); err != nil || got != "" {
+		t.Fatalf("LaunchRepo = (%q, %v), want (%q, nil)", got, err, "")
 	}
 }

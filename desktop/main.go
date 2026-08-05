@@ -160,6 +160,18 @@ func main() {
 	}
 	defer c.Close()
 
+	// BACI-368: resolve (and, on first sight, enrol) the repo we were
+	// launched from, so the UI opens on it rather than the
+	// last-remembered pick. Best-effort: launched from the Finder there
+	// is no repo, and a failure just means the UI falls back.
+	var launchPrefix string
+	if repo, lerr := client.EnsureRepoForDir(context.Background(), c, cwd); lerr != nil {
+		logger.Warn("launch repo: resolve failed", "dir", cwd, "err", lerr)
+	} else if repo != nil {
+		launchPrefix = repo.Prefix
+		logger.Info("launch repo resolved", "prefix", launchPrefix, "dir", cwd)
+	}
+
 	// Create a new Wails application by providing the necessary options.
 	// Variables 'Name' and 'Description' are for application metadata.
 	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
@@ -169,7 +181,7 @@ func main() {
 		Name:        "bacio-desktop",
 		Description: "A demo of using raw HTML & CSS",
 		Services: []application.Service{
-			application.NewService(NewBoardService(c)),
+			application.NewService(NewBoardService(c, launchPrefix)),
 			application.NewService(NewDocService(c)),
 			application.NewService(NewFeatureService(c)),
 			application.NewService(NewHistoryService(c)),
