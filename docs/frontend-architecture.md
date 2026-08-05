@@ -133,6 +133,35 @@ follows the dominant convention: **`"Couldn't <verb> <object>"`**, double-quoted
 no trailing punctuation (e.g. `"Couldn't load boards"`). Keep new headlines in
 that form.
 
+### 5a. Ship sound (`lib/shipSfxEngine.ts`)
+
+The second module-level singleton, for the same reason as `errors.ts`: it owns a
+browser-global resource (an `AudioContext`) plus window-level gesture listeners,
+and the Settings pane needs to read its state without prop-threading. The React
+side is a thin facade — `lib/shipSfx.ts` keeps the Vite-only `kaching.mp3` import
+and exposes `useShipSfx({ enabled }) → { play }` (CardsProvider's count-rise
+effect) and `useShipSfxStatus()` (a `useSyncExternalStore` read for the Settings
+status line). The pure decisions live in `lib/shipSfxGate.ts`, importable from
+Node.
+
+**The autoplay contract — read this before touching the unlock path.** The two
+engines grant autoplay on different axes. Chromium uses **origin-level sticky
+activation**: any past click on the origin permits a later `play()`. WebKit
+(Safari, and the desktop app's WKWebView) grants **per-context**, and only when
+the unlock runs inside a real gesture. A ship usually has no gesture of its own —
+an agent moves the card and the count arrives on a poll — so the engine unlocks
+eagerly on the user's first click: `new AudioContext()` + `ctx.resume()`, both
+**synchronous** inside the handler (Safari loses the activation across an
+`await`); the fetch + `decodeAudioData` follow asynchronously, needing no gesture.
+
+The rule that BACI-375 exists to enforce: **never mark the sound unlocked
+optimistically.** BACI-336 set an `unlocked` flag before its `play()` promise
+settled, so on WebKit the flag went true, the attempt was refused, and the
+first-gesture listener early-returned forever — invisible in Chrome, permanently
+silent in Safari. "Am I unlocked" is now read straight off `ctx.state`, the
+gesture listeners stay armed until it is genuinely `running`, and `onstatechange`
+re-arms them if it later suspends or is interrupted.
+
 ## 6. The safety net — tests & lint
 
 - **Vitest + Testing Library** under `__tests__/` folders, run under jsdom with

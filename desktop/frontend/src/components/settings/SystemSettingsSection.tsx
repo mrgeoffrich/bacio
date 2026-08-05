@@ -5,6 +5,8 @@ import { EMPTY_NEW_TEMPLATE, useTemplateManagement } from './useTemplateManageme
 import TemplateAddForm from './TemplateAddForm';
 import TemplateRow from './TemplateRow';
 import ConfirmModal from './ConfirmModal';
+import { useShipSfxStatus } from '../../lib/shipSfx';
+import type { ShipSfxState } from '../../lib/shipSfx';
 
 // BACI-248: System Settings section — the global, app-wide preferences
 // pane carved out of the old single-scroll SettingsView body. Mounted
@@ -49,6 +51,31 @@ function ScopeChip({ kind }: ScopeChipProps) {
     <span className={`mk-settings-scope-chip mk-settings-scope-chip--${kind}`}>
       {label}
     </span>
+  );
+}
+
+// BACI-375: the Ship sound row's live status line. The ka-ching can be
+// quiet for four legitimate reasons (toggle off, no gesture yet, autoplay
+// refused, sound unloadable) and before this they were indistinguishable
+// from a bug. Reads the Web Audio engine's derived status directly — no
+// prop threading, because the engine is a module singleton.
+const SHIP_SFX_COPY: Record<Exclude<ShipSfxState, 'off'>, { tone: string; text: string }> = {
+  ready: { tone: 'ready', text: 'Ready — the next ship will play.' },
+  loading: { tone: 'warn', text: 'Loading the sound…' },
+  locked: { tone: 'warn', text: 'Waiting for a click on the page — browsers only allow sound after you interact.' },
+  blocked: { tone: 'error', text: "Blocked by the browser's autoplay policy." },
+  unavailable: { tone: 'error', text: "The sound can't be loaded." },
+};
+
+function ShipSoundStatus() {
+  const status = useShipSfxStatus();
+  if (status.state === 'off') return null;
+  const { tone, text } = SHIP_SFX_COPY[status.state];
+  return (
+    <div className={`mk-settings-status mk-settings-status--${tone}`}>
+      <span className="mk-settings-status-dot" />
+      <span>{status.detail ? `${text} ${status.detail}` : text}</span>
+    </div>
   );
 }
 
@@ -183,11 +210,12 @@ export default function SystemSettingsSection({
       </section>
 
       {/* BACI-240 / BACI-295: ship-flourish ka-ching SFX toggle. On by
-          default now. The play path is silently no-op'd by the browser's
-          autoplay policy (the page needs at least one user gesture before
-          audio is allowed), so it just stays quiet until you interact
-          with the page. prefers-reduced-motion no longer mutes it —
-          that preference governs animation, not audio. */}
+          default now. The browser's autoplay policy means the page needs
+          at least one user gesture before audio is allowed, so the sound
+          stays quiet until you interact with the page — BACI-375's
+          status line below reports exactly which of those states it's
+          in. prefers-reduced-motion no longer mutes it — that preference
+          governs animation, not audio. */}
       <section className="mk-settings-row">
         <div className="mk-settings-row-text">
           <div className="mk-settings-label">
@@ -195,8 +223,9 @@ export default function SystemSettingsSection({
             <ScopeChip kind="server" />
           </div>
           <div className="mk-settings-hint">
-            When on, the Pipeline's Shipped pill plays a short ka-ching whenever the Shipped count rolls up. On by default. Honours the OS-level mute and the browser autoplay policy — the sound silently no-ops (it needs at least one click on the page before audio is allowed) rather than erroring.
+            When on, the Pipeline's Shipped pill plays a short ka-ching whenever the Shipped count rolls up. On by default. Honours the OS-level mute and the browser autoplay policy, which needs at least one click on the page before audio is allowed.
           </div>
+          <ShipSoundStatus />
         </div>
         <div className="mk-segmented" role="group" aria-label="Ship sound">
           {ON_OFF_OPTIONS.map(opt => (
