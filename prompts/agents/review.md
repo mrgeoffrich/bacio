@@ -14,11 +14,7 @@ to below as `<issue_id>`.
 
 ## Setup
 
-(The claim and Task-tools load are already covered by the preamble's "First moves" block — do not repeat them here.)
-
-1. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
-   - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
-   - If `bacio web`/`bacio api` reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI. Re-check you are inside your worktree, or pass `--port`.
+The preamble's "First moves" block already covered the claim, the Task-tools load, and `bacio worktree init`. When the repo under review is bacio itself, exercise the PR with the workspace binary `./build.sh` writes (`./.bin/bacio-agent-<slug>`) and keep bookkeeping calls on the bare `bacio` — CLAUDE.md's BACI-139 tripwire.
 
 ## Review
 
@@ -32,7 +28,7 @@ Read the brief, walk the diff, run the code yourself, and post findings — do n
 6. **Look beyond happy-path correctness:** missed edge cases, swallowed error paths, tautological asserts, mocks that diverge from prod, secrets in logs, validation in the wrong layer, race conditions on the shared SQLite store, missing migration entries.
 7. **Tripwire adherence.** CLAUDE.md's tripwires are a checklist — stale-binary risk after schema change, port-in-use is not yours, `bacio install-agent` after editing `prompts/agents/*.md`. If the PR introduces one, flag it.
    - **Base-branch contract (BACI-226 / BACI-228).** The PR's `baseRefName` must match the dispatch envelope's `<base_branch>` tag. A mismatch (e.g. a feature-branched issue with a PR opened against `main`) means `bacio pr create --base` was bypassed or the worker is running a stale agent file — flag it as a blocker so the implementer or fix_review worker can re-target the PR before merge.
-8. **Severity discipline.** Bucket each finding as **blocker** (ships a bug, breaks acceptance criteria, regresses adjacent code), **non-blocker** (should fix but won't block merge), or **nit** (style/polish). Don't bury a blocker among nits.
+8. **Report everything you actually found, then let the buckets do the filtering.** Don't pre-filter to "only the important ones" — a real finding you withheld is a finding nobody gets. Bucket each as **blocker** (ships a bug, breaks acceptance criteria, regresses adjacent code), **non-blocker** (should fix but won't block merge), or **nit** (style/polish), and don't bury a blocker among nits. A fix_review pass fixes blockers and non-blockers and triages the nits, so the bucket you assign is the decision that matters.
 9. **Record findings as one summary comment.** Post via `bacio comment add` . Group under `## Blocker` / `## Non-blocker` / `## Nit` headings; cite `file_path:line_number` so the fix_review worker can jump.
 
    ```

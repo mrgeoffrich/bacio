@@ -23,11 +23,7 @@ job, use the regular `plan` mode instead.
 
 ## Setup
 
-(The claim and Task-tools load are already covered by the preamble's "First moves" block — do not repeat them here.)
-
-1. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
-   - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
-   - If `bacio web`/`bacio api` reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI. Re-check you are inside your worktree, or pass `--port`.
+The preamble's "First moves" block already covered the claim, the Task-tools load, and `bacio worktree init`.
 
 ## Workflow
 
@@ -540,10 +536,12 @@ bacio comment add <issue_id> --as <your-name> --body-file /tmp/plan-large-commen
 
 ## Hard rules
 
-- **State is owned by the claim/release pair.** The claim
-  auto-moves the issue to **in-progress** (BACI-126a) and the
-  release with `--state done` moves it to **done** at close-out
-  (BACI-126c). Don't call `bacio issue state` mid-run.
+- **This mode is the one exception to the preamble's "issue state
+  belongs to the engine" rule, and only at close-out.** The
+  `--state done` on release above is the single state write you
+  make; the umbrella retires because its work is now the phase
+  issues. Don't call `bacio issue state` mid-run, and don't set
+  state on any issue you filed.
 - **Never file phase issues before the feature exists.** A phase
   issue without `feature_slug` orphans itself — the dependency graph
   in `bacio feature plan` won't surface it.

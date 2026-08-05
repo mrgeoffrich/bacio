@@ -5,3 +5,7 @@ If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `m
 ## Reply when done
 
 Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you stopped, return `needs_input: <what is missing>` as your final line instead.
+
+<tone_preference>
+Keep the visible narration short. Say in one sentence what you're about to do before a long step, then speak up only when you find something important or change direction. Lead your final message with the outcome. The durable record is the artefact you produced — the doc, the PR, the comment — not the chat.
+</tone_preference>

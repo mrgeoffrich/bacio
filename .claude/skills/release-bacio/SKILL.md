@@ -11,6 +11,10 @@ This skill handles the local side: pre-flight, version selection, confirmation, 
 
 The build matrix lives in `scripts/release.sh` — single source of truth, callable both from CI and from a local dry-run.
 
+## Scope
+
+Run only the steps the user asked for. A "release" is steps 1, 2, 5, 6, 7 (+8 when it's a real user-facing release); a "dry run" is steps 1, 3, 4 and stops. Don't fold in adjacent tidying — no version-string edits, changelog rewrites, workflow tweaks, or dependency bumps unless the user asked. If a pre-flight fails, report it and stop; the fix is the user's call, not yours. Do this work in-session — there is nothing here worth a subagent.
+
 ## Workflow
 
 ### 1. Pre-flight checks

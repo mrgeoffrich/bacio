@@ -9,16 +9,11 @@ Take the rough one-liner (or short paragraph) the user dropped on the ticket and
 
 ## Setup
 
-The claim is already covered by the preamble's "First moves" block — do not repeat it here.
-
-Run from inside the worktree (Claude Code already created it via `isolation: worktree` and will remove it when you finish — never run `git worktree add` / `remove` yourself):
+The preamble's "First moves" block already covered the claim and `bacio worktree init`. One read gets you the ticket:
 
 ```bash
-bacio worktree init                                  # claims an API port for this run
 bacio issue brief <issue_id> -o json                 # full ticket + context
 ```
-
-If you must run a `bacio` command from elsewhere, pass `--env <worktree>/environment-config.yaml`.
 
 ## Scoping Workflow
 
@@ -101,10 +96,6 @@ bacio tag add <issue_id> <tag>
 
 The description is just an inline JSON string — JSON's own `\n` escapes give you line breaks; no temp-file dance needed. `customer_impact` is a single inline line; passing `""` (or omitting the key) leaves the issue with no impact line — the read surfaces fall back to the title.
 
-### 6. Sanity check before close-out
-
-Re-read what you just wrote via `bacio issue show <issue_id>` — if any section reads as boilerplate, redo it. The goal is a ticket that a triage reviewer can act on with no further prompting.
-
 ## Close out
 
 1. `bacio worktree rm <path> --confirm <slug>` — drops the bacio environment (Claude Code removes the git worktree itself). Throw away any local file changes.
@@ -118,6 +109,5 @@ Re-read what you just wrote via `bacio issue show <issue_id>` — if any section
 - **No invented acceptance criteria.** Every bullet under Acceptance criteria must be implied by the seed (or by the user's reply to a clarifying question). If you're not sure whether the user wants X, ask — don't bake X in.
 - **No PR, no code edits.** This pass produces a ticket rewrite, not a code change. You may `Read` files freely for recon; do not `Edit`, `Write`, stage, or commit anything in the worktree.
 - **Never create or modify unrelated tickets.** No `bacio issue add`, no re-tagging sibling issues, no cancellation of duplicates without asking first.
-- **State is the engine's, not yours.** The claim is a focus marker (it no longer moves the issue), and a Pipeline-stage release is claim-drop only — the card stays `in_pipeline`. Don't call `bacio issue state` mid-run.
 
 {{> _postamble}}

@@ -892,12 +892,47 @@ The `bacio install-agent` command renders one
 `.claude/agents/bacio-<mode>-worker.md` per dispatchable template from
 the current `prompt_templates` rows. Each generated file's frontmatter
 carries the agent `name` (== file basename == `subagent_type`) and
-`model: opus`; its body is the template body verbatim. The briefs are written verbatim, *not*
+`model:`; its body is the template body verbatim. The briefs are written verbatim, *not*
 `{{token}}`-rendered — a system prompt is fixed per agent type and
 cannot embed a specific issue id, so the six built-in briefs were
 rewritten to refer to "the ticket named in your dispatch prompt". A
 leftover `{{` in a body is a packaging bug — `model.RenderAgentFile`
 rejects it (and a build-time test guards the built-ins).
+
+### Per-mode `model:` and `effort:`
+
+A template body may open with its own frontmatter fence declaring two
+keys, both optional:
+
+```markdown
+---
+model: opus
+effort: medium
+---
+You are a bacio dispatched-work subagent running a …
+```
+
+`model:` (BACI-155) pins the model for that mode, defaulting to
+`model.AgentFileModel` (`opus`) when absent. `effort:` pins Claude
+Code's reasoning effort — one of `low` / `medium` / `high` / `xhigh` /
+`max`, or a positive integer token budget. **Omitted by default**, and
+that matters: an absent `effort:` inherits the session default (`high`)
+rather than pinning a value nobody chose, so leaving it out is not the
+same as writing `effort: high`.
+
+Effort controls thinking volume, not visible response length, and it is
+the cheapest per-mode dial available — a mechanical mode can be stepped
+down without touching a word of its brief, and a hard one stepped up
+without a model change. Pick values against your own runs rather than
+carrying them over from another model; see
+[`docs/opus-5-prompting-guidance.md`](opus-5-prompting-guidance.md) §3.
+None of the built-ins pin one today (a test enforces that), so every
+mode inherits the session default until a sweep says otherwise.
+
+The grammar is deliberately minimal: any key other than these two is
+rejected, as is a duplicate key or an out-of-range effort, so a typo
+fails at `install-agent` time rather than silently at spawn time —
+where a rejected agent file is far harder to diagnose.
 
 The embedded default bodies live in
 [`prompts/agents/`](../prompts/agents/) — one `.md` file per slug,
