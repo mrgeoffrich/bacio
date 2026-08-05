@@ -27,6 +27,9 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /healthz", d.handleHealthz)
 	mux.HandleFunc("GET /version", d.handleVersion)
 	mux.HandleFunc("GET /leader", d.handleLeader)
+	// BACI-368: cross-cutting, not repo-scoped — it *names* a repo
+	// rather than acting on one.
+	mux.HandleFunc("GET /launch-repo", d.handleLaunchRepo)
 
 	mux.HandleFunc("GET /schema", d.handleSchemaAll)
 	mux.HandleFunc("GET /schema/list", d.handleSchemaList)

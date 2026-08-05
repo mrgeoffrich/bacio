@@ -161,13 +161,18 @@ Incoming requests carry their own actor via the X-Actor header
 			if logRes, err := resolveLogging(env); err == nil {
 				logDir = logRes.Dir
 			}
+			// BACI-368: resolve (and, on first sight, enrol) the repo we
+			// were launched from so the UI opens on it instead of the
+			// last-remembered pick.
+			launchPrefix := launchRepoPrefix(s, logger)
 			srv := api.New(s, api.Options{
-				Addr:        addr,
-				Token:       token,
-				CORSOrigins: corsOrigins,
-				MountUI:     true,
-				DBPath:      env.DBPath,
-				LogDir:      logDir,
+				Addr:             addr,
+				Token:            token,
+				CORSOrigins:      corsOrigins,
+				MountUI:          true,
+				DBPath:           env.DBPath,
+				LogDir:           logDir,
+				LaunchRepoPrefix: launchPrefix,
 			}, logger)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -179,7 +184,7 @@ Incoming requests carry their own actor via the X-Actor header
 			// failure logs at info level and exits the goroutine — the
 			// server keeps running.
 			if !noOpen && bundlePresent {
-				go openBrowserWhenReady(ctx, addr, logger)
+				go openBrowserWhenReady(ctx, addr, launchPrefix, logger)
 			}
 
 			// BACI-344: stand up a second /anthropic-only listener on the
@@ -248,8 +253,16 @@ func startSecondaryProxy(ctx context.Context, enabled bool, s *store.Store, prox
 // returns 200, then launches the OS default browser at /ui/. The
 // browser launch is best-effort: a failure is logged at info level
 // and the goroutine exits without affecting the server.
-func openBrowserWhenReady(ctx context.Context, addr string, logger *slog.Logger) {
+//
+// With a launch repo resolved (BACI-368) we open its Pipeline directly
+// — the React tree would land there anyway via /launch-repo, but going
+// straight there saves the redirect hop and is correct even if that
+// fetch fails.
+func openBrowserWhenReady(ctx context.Context, addr, launchPrefix string, logger *slog.Logger) {
 	url := fmt.Sprintf("http://%s/ui/", addr)
+	if launchPrefix != "" {
+		url = fmt.Sprintf("http://%s/ui/%s/pipeline", addr, launchPrefix)
+	}
 	healthURL := fmt.Sprintf("http://%s/healthz", addr)
 
 	ticker := time.NewTicker(browserPollInterval)

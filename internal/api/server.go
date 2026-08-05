@@ -50,6 +50,12 @@ type Options struct {
 	// write (index rows still land); `bacio api` / `bacio web` thread the
 	// resolved dir, tests leave it empty or point it at a temp dir.
 	LogDir string
+	// LaunchRepoPrefix is the repo the process was started in (BACI-368),
+	// resolved by the cobra command from its cwd — the API layer is told
+	// the answer rather than shelling out to git itself. Empty when the
+	// process wasn't started inside a git repo; served as-is by
+	// GET /launch-repo.
+	LaunchRepoPrefix string
 }
 
 // Server is the wired-up HTTP server. The caller (cmd/bacio) owns the store

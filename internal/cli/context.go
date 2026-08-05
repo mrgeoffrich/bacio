@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -223,6 +224,31 @@ func resolveRepo(s *store.Store) (*model.Repo, error) {
 		fmt.Fprintln(os.Stderr, "bacio: warning: bootstrap repo defaults:", err)
 	}
 	return created, nil
+}
+
+// launchRepoPrefix resolves the repo the process was started in, so
+// `bacio web` / `bacio api` can tell the UI which repo to open on
+// (BACI-368). Registers the repo on first sight, exactly like every
+// other bacio entry point.
+//
+// Never returns an error: a launch-repo hiccup must not stop a server
+// booting, and "not started inside a git repo" is an ordinary outcome.
+// Both cases yield "" and the UI falls back to its remembered pick.
+func launchRepoPrefix(s *store.Store, logger *slog.Logger) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		logger.Warn("launch repo: cannot resolve cwd", "err", err)
+		return ""
+	}
+	repo, err := client.EnsureRepoForDir(context.Background(), client.NewLocalFromStore(s, actor()), cwd)
+	if err != nil {
+		logger.Warn("launch repo: resolve failed", "dir", cwd, "err", err)
+		return ""
+	}
+	if repo == nil {
+		return ""
+	}
+	return repo.Prefix
 }
 
 // matchPhantomByRemote looks for a phantom repo (path = '') whose
