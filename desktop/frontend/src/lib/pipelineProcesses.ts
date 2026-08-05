@@ -28,6 +28,14 @@ export const PIPELINE_PROCESSES: PipelineProcess[] = [
   // new issue created from the Pipeline screen — scope once, then park the
   // card back in Backlog at the Shelve sentinel.
   { slug: 'scope-shelve', name: 'Scope → Shelve', stages: ['scope', 'shelve'] },
+  // scope-plan-implement-ship (BACI-374): the fire-and-forget chain armed by
+  // the auto-run toggle on the New Issue composer — triage to Shipping with
+  // no human gate in between.
+  {
+    slug: 'scope-plan-implement-ship',
+    name: 'Scope → Plan → Implement → Ship',
+    stages: ['scope', 'plan', 'implement', 'ship'],
+  },
   { slug: 'research', name: 'Research', stages: ['research'] },
 ];
 

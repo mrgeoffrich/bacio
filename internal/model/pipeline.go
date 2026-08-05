@@ -220,6 +220,11 @@ var pipelineProcesses = []Process{
 	// Pipeline-screen issue — run one Scope pass, then park the card back in
 	// Backlog at the Shelve sentinel for the human to triage the result.
 	{Slug: "scope-shelve", Name: "Scope → Shelve", Stages: []string{BuiltinTemplateScope, ShelveJobMode}},
+	// scope-plan-implement-ship (BACI-374): the fire-and-forget chain armed
+	// by the auto-run toggle on the New Issue composers — carry a brand-new
+	// card the whole way from triage to the Shipping hand-off with no human
+	// gate in between.
+	{Slug: "scope-plan-implement-ship", Name: "Scope → Plan → Implement → Ship", Stages: []string{BuiltinTemplateScope, BuiltinTemplatePlan, BuiltinTemplateImplement, ShipJobMode}},
 	{Slug: "research", Name: "Research", Stages: []string{BuiltinTemplateResearch}},
 }
 
