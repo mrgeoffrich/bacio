@@ -85,6 +85,43 @@ func (d deps) handleReposCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_input", "name is required", map[string]any{"field": "name"})
 		return
 	}
+
+	// The (kind, path) invariant, enforced here as well as at the store
+	// boundary so the caller gets a field-attributed 400 instead of a
+	// generic refusal. A workspace has no checkout at all — path and
+	// remote_url must be empty — while a git repo has nothing to track
+	// without a path. Absent kind reads as "git", which is what every
+	// pre-pivot caller sends.
+	kind := model.RepoKind(strings.ToLower(strings.TrimSpace(in.Kind)))
+	switch kind {
+	case "":
+		kind = model.RepoKindGit
+	case model.RepoKindGit, model.RepoKindWorkspace:
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			fmt.Sprintf("unknown repo kind %q (want %q or %q)", in.Kind, model.RepoKindGit, model.RepoKindWorkspace),
+			map[string]any{"field": "kind"})
+		return
+	}
+	if kind == model.RepoKindWorkspace {
+		if strings.TrimSpace(in.Path) != "" {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"a workspace has no working tree — path must be empty",
+				map[string]any{"field": "path"})
+			return
+		}
+		if strings.TrimSpace(in.RemoteURL) != "" {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"a workspace has no git remote — remote_url must be empty",
+				map[string]any{"field": "remote_url"})
+			return
+		}
+		// Identical body to POST /workspaces, deliberately: one
+		// implementation, two entry points.
+		d.createWorkspace(w, r, in.Name, in.Prefix)
+		return
+	}
+
 	if strings.TrimSpace(in.Path) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_input", "path is required", map[string]any{"field": "path"})
 		return
@@ -100,6 +137,13 @@ func (d deps) handleReposCreate(w http.ResponseWriter, r *http.Request) {
 		prefix = p
 	}
 
+	// Reachable only on the git branch, so in.Path is non-empty here.
+	// That matters: GetRepoByPath("") returns ErrNotFound by design
+	// (a pathless row is a phantom or a workspace and can never be
+	// "the repo registered at this path"), so an empty path reaching
+	// this call would report a false negative rather than a false
+	// "already registered" — but the workspace branch above returns
+	// before it either way.
 	if existing, err := d.store.GetRepoByPath(in.Path); err == nil {
 		writeError(w, http.StatusConflict, "conflict",
 			"repo already registered for this path",
@@ -133,8 +177,12 @@ func (d deps) handleReposCreate(w http.ResponseWriter, r *http.Request) {
 
 	if isDryRun(r) {
 		writeDryRun(w, http.StatusCreated, &model.Repo{
-			Prefix:          prefix,
-			Name:            in.Name,
+			Prefix: prefix,
+			Name:   in.Name,
+			// Explicit: model.Repo.Kind has no omitempty, so a zero value
+			// would put `"kind": ""` on the wire and the frontend's
+			// 'git' | 'workspace' union would not match it.
+			Kind:            model.RepoKindGit,
 			Path:            in.Path,
 			RemoteURL:       in.RemoteURL,
 			NextIssueNumber: 1,
@@ -257,7 +305,7 @@ func repoCascadeDetails(repo *model.Repo, c store.RepoCascadeCounts) string {
 //	200 OK            — happy path, RepoLinkResult JSON body
 //	200 OK + dry_run  — projection only, no DB write
 //	404 not_found     — no such prefix
-//	409 conflict      — not_phantom / path_already_bound / no_owning_sync_repo
+//	409 conflict      — not_phantom / path_already_bound / no_owning_sync_repo / workspace
 //	400 invalid_input — path_not_absolute / path_not_exists / path_not_git
 //
 // Every error envelope embeds the `kind` string in `details` so the
@@ -291,7 +339,12 @@ func (d deps) handleRepoLink(w http.ResponseWriter, r *http.Request) {
 				details["existing_prefix"] = linkErr.ExistingPrefix
 			}
 			switch linkErr.Kind {
-			case "not_phantom", "path_already_bound", "no_owning_sync_repo":
+			// "workspace" joins the not_phantom class: the prefix exists
+			// and the request is well-formed, but the target is a
+			// workspace — pathless like a phantom yet never linkable,
+			// because it has no checkout anywhere on any machine. 409,
+			// not 400: nothing about the input is malformed.
+			case "not_phantom", "path_already_bound", "no_owning_sync_repo", "workspace":
 				writeError(w, http.StatusConflict, "conflict", linkErr.Error(), details)
 			case "path_not_absolute", "path_not_exists", "path_not_git":
 				writeError(w, http.StatusBadRequest, "invalid_input", linkErr.Error(), details)

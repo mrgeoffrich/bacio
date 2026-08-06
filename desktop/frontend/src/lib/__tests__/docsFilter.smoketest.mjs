@@ -12,8 +12,11 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const moduleRoot = path.resolve(__dirname, '..');
 
-const { filterDocs, sortDocs, countFacets, isTranscriptDoc } =
-  await import(path.join(moduleRoot, 'docsFilter.ts'));
+const {
+  filterDocs, sortDocs, countFacets, isTranscriptDoc,
+  buildTree, flattenTreeDocs, folderAncestry, findFolderNode,
+  shouldFlatten, activeFacetCount,
+} = await import(path.join(moduleRoot, 'docsFilter.ts'));
 
 // makeDoc builds a minimal DocSummary-shaped row. updatedAt/createdAt
 // default to a deterministic per-index timestamp so sort ties are
@@ -29,6 +32,8 @@ function makeDoc(over = {}) {
     archivedAt: over.archivedAt ?? null,
     snippet: over.snippet ?? '',
     links: over.links ?? [],
+    folderUuid: over.folderUuid ?? '',
+    folderPosition: over.folderPosition ?? 0,
   };
 }
 
@@ -231,6 +236,160 @@ test('sortDocs is stable on ties (preserves input order)', () => {
   const sorted = sortDocs(docs, 'updated');
   // All timestamps equal — input order preserved.
   assert.deepEqual(sorted.map(d => d.filename), ['x', 'y', 'z']);
+});
+
+// ---- the page tree (the pivot) ----
+
+function makeFolder(over = {}) {
+  return {
+    uuid: over.uuid ?? 'u',
+    name: over.name ?? 'Folder',
+    parentUuid: over.parentUuid ?? '',
+    position: over.position ?? 0,
+  };
+}
+
+const names = (nodes) => nodes.map(n => (n.kind === 'folder' ? `+${n.name}` : n.filename));
+
+test('buildTree puts loose pages at the root and nests filed ones', () => {
+  const folders = [makeFolder({ uuid: 'arch', name: 'Architecture' })];
+  const docs = [
+    makeDoc({ i: 0, filename: 'README.md' }),
+    makeDoc({ i: 1, filename: 'data-model.md', folderUuid: 'arch' }),
+  ];
+  const tree = buildTree(docs, folders);
+  assert.deepEqual(names(tree), ['+Architecture', 'README.md']);
+  assert.deepEqual(names(tree[0].children), ['data-model.md']);
+});
+
+test('buildTree sorts folders before pages at every level', () => {
+  const folders = [
+    makeFolder({ uuid: 'a', name: 'Alpha' }),
+    makeFolder({ uuid: 'b', name: 'Beta' }),
+  ];
+  const docs = [makeDoc({ i: 0, filename: 'aaa.md' })];
+  assert.deepEqual(names(buildTree(docs, folders)), ['+Alpha', '+Beta', 'aaa.md']);
+});
+
+test('buildTree orders folders by position then name, pages by folderPosition then filename', () => {
+  const folders = [
+    makeFolder({ uuid: 'z', name: 'Zeta', position: 0 }),
+    makeFolder({ uuid: 'a', name: 'Alpha', position: 1 }),
+  ];
+  const docs = [
+    makeDoc({ i: 0, filename: 'b.md', folderPosition: 0 }),
+    makeDoc({ i: 1, filename: 'a.md', folderPosition: 0 }),
+    makeDoc({ i: 2, filename: 'first.md', folderPosition: -1 }),
+  ];
+  assert.deepEqual(
+    names(buildTree(docs, folders)),
+    ['+Zeta', '+Alpha', 'first.md', 'a.md', 'b.md'],
+  );
+});
+
+test('buildTree docCount counts the whole subtree, not just direct children', () => {
+  const folders = [
+    makeFolder({ uuid: 'arch', name: 'Architecture' }),
+    makeFolder({ uuid: 'store', name: 'Storage', parentUuid: 'arch' }),
+  ];
+  const docs = [
+    makeDoc({ i: 0, filename: 'top.md', folderUuid: 'arch' }),
+    makeDoc({ i: 1, filename: 'sqlite.md', folderUuid: 'store' }),
+    makeDoc({ i: 2, filename: 'migrations.md', folderUuid: 'store' }),
+  ];
+  const tree = buildTree(docs, folders);
+  assert.equal(tree[0].docCount, 3);
+  assert.equal(tree[0].children[0].docCount, 2);
+});
+
+test('buildTree re-roots a page filed under an unknown folder rather than dropping it', () => {
+  const tree = buildTree([makeDoc({ i: 0, filename: 'orphan.md', folderUuid: 'gone' })], []);
+  assert.deepEqual(names(tree), ['orphan.md']);
+});
+
+test('buildTree re-roots a folder whose parent is missing', () => {
+  const folders = [makeFolder({ uuid: 'child', name: 'Child', parentUuid: 'gone' })];
+  assert.deepEqual(names(buildTree([], folders)), ['+Child']);
+});
+
+test('buildTree survives a parent cycle without hanging', () => {
+  const folders = [
+    makeFolder({ uuid: 'a', name: 'A', parentUuid: 'b' }),
+    makeFolder({ uuid: 'b', name: 'B', parentUuid: 'a' }),
+  ];
+  // Both are re-rooted rather than lost; the point is that it terminates.
+  assert.deepEqual(names(buildTree([], folders)).sort(), ['+A', '+B']);
+});
+
+test('flattenTreeDocs walks in render order, across folder boundaries', () => {
+  const folders = [
+    makeFolder({ uuid: 'arch', name: 'Architecture', position: 0 }),
+    makeFolder({ uuid: 'store', name: 'Storage', parentUuid: 'arch' }),
+  ];
+  const docs = [
+    makeDoc({ i: 0, filename: 'README.md' }),
+    makeDoc({ i: 1, filename: 'top.md', folderUuid: 'arch' }),
+    makeDoc({ i: 2, filename: 'sqlite.md', folderUuid: 'store' }),
+  ];
+  const order = flattenTreeDocs(buildTree(docs, folders)).map(d => d.filename);
+  assert.deepEqual(order, ['sqlite.md', 'top.md', 'README.md']);
+});
+
+test('folderAncestry returns the root→leaf chain', () => {
+  const folders = [
+    makeFolder({ uuid: 'a', name: 'A' }),
+    makeFolder({ uuid: 'b', name: 'B', parentUuid: 'a' }),
+    makeFolder({ uuid: 'c', name: 'C', parentUuid: 'b' }),
+  ];
+  assert.deepEqual(folderAncestry(folders, 'c').map(f => f.name), ['A', 'B', 'C']);
+  assert.deepEqual(folderAncestry(folders, ''), []);
+  assert.deepEqual(folderAncestry(folders, 'nope'), []);
+});
+
+test('folderAncestry terminates on a cycle', () => {
+  const folders = [
+    makeFolder({ uuid: 'a', name: 'A', parentUuid: 'b' }),
+    makeFolder({ uuid: 'b', name: 'B', parentUuid: 'a' }),
+  ];
+  assert.ok(folderAncestry(folders, 'a').length <= 2);
+});
+
+test('findFolderNode locates a nested folder and returns null for a missing one', () => {
+  const folders = [
+    makeFolder({ uuid: 'arch', name: 'Architecture' }),
+    makeFolder({ uuid: 'store', name: 'Storage', parentUuid: 'arch' }),
+  ];
+  const tree = buildTree([], folders);
+  assert.equal(findFolderNode(tree, 'store').name, 'Storage');
+  assert.equal(findFolderNode(tree, 'gone'), null);
+  assert.equal(findFolderNode(tree, ''), null);
+});
+
+// ---- flatten-on-filter ----
+
+const neutralQuery = { search: '', type: '', links: 'all', status: 'active', sort: 'updated' };
+
+test('shouldFlatten is false for the neutral query', () => {
+  assert.equal(shouldFlatten(neutralQuery), false);
+});
+
+test('shouldFlatten is true once the user narrows in any way', () => {
+  assert.equal(shouldFlatten({ ...neutralQuery, search: 'sync' }), true);
+  assert.equal(shouldFlatten({ ...neutralQuery, type: 'plan' }), true);
+  assert.equal(shouldFlatten({ ...neutralQuery, links: 'issue' }), true);
+  assert.equal(shouldFlatten({ ...neutralQuery, status: 'archived' }), true);
+});
+
+test('shouldFlatten ignores whitespace-only search and any sort change', () => {
+  assert.equal(shouldFlatten({ ...neutralQuery, search: '   ' }), false);
+  assert.equal(shouldFlatten({ ...neutralQuery, sort: 'name' }), false);
+});
+
+test('activeFacetCount counts the narrowing chips, not the search box', () => {
+  assert.equal(activeFacetCount(neutralQuery), 0);
+  assert.equal(activeFacetCount({ ...neutralQuery, search: 'x' }), 0);
+  assert.equal(activeFacetCount({ ...neutralQuery, type: 'plan', links: 'issue' }), 2);
+  assert.equal(activeFacetCount({ ...neutralQuery, type: 'plan', links: 'issue', status: 'all' }), 3);
 });
 
 // ---- runner ----

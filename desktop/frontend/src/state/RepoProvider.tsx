@@ -5,7 +5,7 @@ import * as api from '../api';
 import type { Board, BoardColumn, BoardCard, AddRepositoryPayload } from '../api';
 import { reportError } from '../errors';
 import { readLocalStorage, writeLocalStorage } from '../lib/hooks/useLocalStorage';
-import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath, repoPrefixFromKey } from '../lib/routes';
+import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath, repoPrefixFromKey, homeView } from '../lib/routes';
 
 // RepoProvider (BACI-361) owns the repo-selection layer App.tsx used to
 // carry: the boards/columns list, the BACI-285 URL-derived active repo and
@@ -124,14 +124,17 @@ export function RepoProvider({ children }: { children: ReactNode }) {
     return boards[0]?.prefix ?? '';
   })();
   // BACI-285: where a bare `/` or prefix-less legacy path redirects. Bare `/`
-  // → the fallback repo's Pipeline. A legacy page link keeps its page path,
-  // rebased under the fallback prefix. An empty fallback (no repos) lands on
-  // bare `/` so the empty-state renders rather than a `//` path.
+  // → the fallback repo's home board (the Agentic Pipeline, or the Kanban for
+  // a workspace — a workspace hides the Pipeline nav entry, so landing there
+  // would strand the user). A legacy page link keeps its page path, rebased
+  // under the fallback prefix. An empty fallback (no repos) lands on bare `/`
+  // so the empty-state renders rather than a `//` path.
   const legacyRedirectTarget = (() => {
     if (!fallbackPrefix) return '/';
     const rest = location.pathname.replace(/^\/+/, '');
     if (rest && legacyPageWord(urlPrefix)) return `/${fallbackPrefix}/${rest}`;
-    return viewPath(fallbackPrefix, 'pipeline');
+    const fallbackKind = boards.find(b => b.prefix === fallbackPrefix)?.kind;
+    return viewPath(fallbackPrefix, homeView(fallbackKind));
   })();
 
   // BACI-203: derive the active view from the URL path. The Topbar reads the
@@ -147,13 +150,16 @@ export function RepoProvider({ children }: { children: ReactNode }) {
   // BACI-285: repo switch — picking a repo routes to it. Land on the same
   // page in the new repo (the current view); the trailing entity segment on
   // a detail route is naturally dropped because viewPath emits the list/page
-  // root only. Falls back to the pipeline view when the current path isn't a
-  // known nav view (e.g. the repo-not-found screen itself).
+  // root only. Falls back to the target repo's home board when the current
+  // path isn't a known nav view (e.g. the repo-not-found screen itself) —
+  // and switching onto a workspace from the Agentic Pipeline lands on its
+  // Kanban, because the workspace has no Pipeline nav entry to highlight.
   const pickBoard = useCallback((prefix: string) => {
     if (!prefix) return;
-    const currentView = viewFromPath(location.pathname) || 'pipeline';
-    navigate(viewPath(prefix, currentView));
-  }, [navigate, location.pathname]);
+    const home = homeView(boards.find(b => b.prefix === prefix)?.kind);
+    const currentView = viewFromPath(location.pathname) || home;
+    navigate(viewPath(prefix, currentView === 'pipeline' ? home : currentView));
+  }, [navigate, location.pathname, boards]);
 
   // BACI-203: navigate-by-key for prev/next sibling jumps, the kanban
   // blocked-popover link, and the Shipped pill / notification deep-links.
@@ -183,16 +189,17 @@ export function RepoProvider({ children }: { children: ReactNode }) {
 
   // Close the workspace: navigate back. With BrowserRouter the browser's
   // back stack handles "back to the previous view"; navigate(-1) goes one
-  // step back, falling through to the Pipeline if there's nothing on the
-  // back stack (a deep-link refresh). The in-progress brief / descEditing
-  // tear down with the route-scoped useOpenIssue hook on unmount.
+  // step back, falling through to the repo's home board if there's nothing
+  // on the back stack (a deep-link refresh). The in-progress brief /
+  // descEditing tear down with the route-scoped useOpenIssue hook on unmount.
   const closeIssue = useCallback(() => {
     if (window.history.state && window.history.length > 1) {
       navigate(-1);
     } else {
-      navigate(viewPath(activeBoard, 'pipeline'));
+      const kind = boards.find(b => b.prefix === activeBoard)?.kind;
+      navigate(viewPath(activeBoard, homeView(kind)));
     }
-  }, [navigate, activeBoard]);
+  }, [navigate, activeBoard, boards]);
 
   // refreshBoards re-fetches the repository list (e.g. after a sync-driven
   // change). The mount load + addRepository keep `boards` seeded otherwise.
@@ -213,8 +220,8 @@ export function RepoProvider({ children }: { children: ReactNode }) {
         return api.listBoards().then(bs => {
           setBoards(bs);
           // BACI-285: the active repo is URL-derived — route to the new
-          // repo's pipeline so it becomes active.
-          navigate(viewPath(board.prefix, 'pipeline'));
+          // repo's home board so it becomes active.
+          navigate(viewPath(board.prefix, homeView(board.kind)));
           return board;
         });
       })

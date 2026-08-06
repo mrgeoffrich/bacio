@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -40,8 +41,52 @@ func renderText(w io.Writer, v any) error {
 	case *model.Repo:
 		return printRepo(w, x)
 	case []*model.Repo:
+		// `kind` is part of the JSON contract already (model.Repo carries
+		// it with no omitempty). Surface it in the human read too, and
+		// show a workspace's pathlessness as the deliberate state it is
+		// rather than a suspicious blank column.
 		for _, r := range x {
-			fmt.Fprintf(w, "%s  %s\t%s\n", r.Prefix, r.Name, r.Path)
+			fmt.Fprintf(w, "%-6s %-9s %s\t%s\n", r.Prefix, r.Kind, r.Name, repoPathLabel(r))
+		}
+	case []*docFolderRow:
+		for _, f := range x {
+			fmt.Fprintf(w, "%-40s %s\n", f.Path, f.UUID)
+		}
+	case *docFolderRow:
+		fmt.Fprintf(w, "Path:     %s\n", x.Path)
+		fmt.Fprintf(w, "Name:     %s\n", x.Name)
+		fmt.Fprintf(w, "UUID:     %s\n", x.UUID)
+		fmt.Fprintf(w, "Position: %d\n", x.Position)
+	case *client.DocFolderDeletePreview:
+		fmt.Fprintf(w, "Folder:            %s\n", x.Path)
+		fmt.Fprintf(w, "Subfolders:        %d (deleted with it)\n", x.Cascade.Subfolders)
+		fmt.Fprintf(w, "Documents:         %d (re-rooted, never deleted)\n", x.Cascade.DocumentsReRooted)
+	case []*kanbanLaneRow:
+		for _, c := range x {
+			fmt.Fprintf(w, "%-3d %-24s %d card(s)\n", c.Position, c.Name, c.Cards)
+		}
+	case *kanbanColumnRow:
+		fmt.Fprintf(w, "Name:     %s\n", x.Name)
+		fmt.Fprintf(w, "UUID:     %s\n", x.UUID)
+		fmt.Fprintf(w, "Position: %d\n", x.Position)
+	case *client.KanbanColumnDeletePreview:
+		fmt.Fprintf(w, "Lane:              %s (position %d)\n", x.Column.Name, x.Column.Position)
+		fmt.Fprintf(w, "Cards off-boarded: %d (the issues themselves are kept)\n", x.Cascade.IssuesRemovedFromBoard)
+	case *repoDeletePreview:
+		// Without this case the struct fell through to `%v` and a
+		// `bacio repo rm --dry-run` printed a raw Go value complete with
+		// a pointer address — on the one command whose entire purpose is
+		// telling a human what is about to be destroyed.
+		if r, ok := x.Repo.(*model.Repo); ok && r != nil {
+			fmt.Fprintf(w, "%s\t%s\n", r.Prefix, r.Name)
+			fmt.Fprintf(w, "Kind:     %s\n", r.Kind)
+			fmt.Fprintf(w, "Path:     %s\n", repoPathLabel(r))
+		}
+		if c, ok := x.Cascade.(store.RepoCascadeCounts); ok {
+			fmt.Fprintln(w, "Would delete:")
+			for _, b := range repoCascadeBullets(c) {
+				fmt.Fprintf(w, "  - %s\n", b)
+			}
 		}
 	case *model.Feature:
 		fmt.Fprintf(w, "%s\t%s\n", x.Slug, x.Title)
@@ -234,10 +279,26 @@ func printPromptTemplateSummary(w io.Writer, t *promptTemplateSummary) {
 	fmt.Fprintf(w, "%-16s %-20s (%s)  %s\n", t.Slug, t.Label, origin, t.Body)
 }
 
+// repoPathLabel renders a repo's path for the human read. An empty path
+// is not an error or a gap — it means one of two very different things,
+// and naming which one saves a user hunting for a checkout that will
+// never exist.
+func repoPathLabel(r *model.Repo) string {
+	switch {
+	case r.HasWorkingTree():
+		return r.Path
+	case r.IsWorkspace():
+		return "(workspace — no working tree)"
+	default:
+		return "(phantom — not linked on this machine)"
+	}
+}
+
 func printRepo(w io.Writer, r *model.Repo) error {
 	fmt.Fprintf(w, "Prefix:    %s\n", r.Prefix)
 	fmt.Fprintf(w, "Name:      %s\n", r.Name)
-	fmt.Fprintf(w, "Path:      %s\n", r.Path)
+	fmt.Fprintf(w, "Kind:      %s\n", r.Kind)
+	fmt.Fprintf(w, "Path:      %s\n", repoPathLabel(r))
 	if r.RemoteURL != "" {
 		fmt.Fprintf(w, "Remote:    %s\n", r.RemoteURL)
 	}

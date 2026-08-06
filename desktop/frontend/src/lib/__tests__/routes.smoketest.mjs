@@ -27,6 +27,7 @@ const {
   prefixFromPath,
   monitorTranscriptsPath,
   transcriptPath,
+  homeView,
 } = await import(path.join(moduleRoot, 'routes.ts'));
 
 const tests = [];
@@ -106,6 +107,20 @@ test('viewFromPath skips the prefix then inverts viewPath for the Topbar', () =>
   assert.equal(viewFromPath('/BACI'), '');
   assert.equal(viewFromPath('/'), '');
   assert.equal(viewFromPath(''), '');
+});
+
+test('homeView sends a workspace to its Kanban and everything else to the Pipeline', () => {
+  // Locked decision D1: a workspace hides the Agentic Pipeline nav entry (no
+  // working tree ⇒ nowhere for a dispatched agent to work), so it must not be
+  // the landing view for one.
+  assert.equal(homeView('workspace'), 'board');
+  assert.equal(homeView('git'), 'pipeline');
+  // Unknown / absent kind degrades to the pre-pivot behaviour.
+  assert.equal(homeView(undefined), 'pipeline');
+  assert.equal(homeView(''), 'pipeline');
+  // And it composes with viewPath to the URLs the router actually mounts.
+  assert.equal(viewPath('WORK', homeView('workspace')), '/WORK/issues');
+  assert.equal(viewPath('BACI', homeView('git')), '/BACI/pipeline');
 });
 
 let failed = 0;

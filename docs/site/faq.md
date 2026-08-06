@@ -63,6 +63,22 @@ A **feature** is an optional grouping — think *project*, *epic*, *shipping uni
 
 Yes. Every git repo you run `bacio init` (or any mutating `bacio` command — `bacio status` is read-only and won't register) in registers as a new row with its own prefix. The global DB at `~/.bacio/db.sqlite` holds them all. `bacio issue list --all-repos` and `bacio history --all-repos` are the cross-repo reads.
 
+## Can I track something that isn't a git repo?
+
+Yes — that's a [workspace](/concepts/workspaces). `bacio workspace add "Home Renovation"` gives you a project with a 4-letter prefix, issues, documents and a Kanban board, and no folder on disk. Because there's no working tree to detect, every command that targets it needs `--repo HOME` (or `export BACIO_REPO=HOME`).
+
+## Why does my repo's Kanban start empty?
+
+Because a card is on the Kanban only if you put it in a lane. The Kanban is a **separate axis** from the Agentic Pipeline, not a second view of it — otherwise every `todo` card would render twice on two boards. Put one on with `bacio kanban move MINI-42 --column Doing`. (Workspaces are the exception: there's no Pipeline there, so every new issue lands on a lane automatically.) See [Kanban and the Agentic Pipeline](/concepts/kanban-and-pipeline).
+
+## Can two documents in different folders have the same name?
+
+No. Filenames are unique across the whole project — folders are organisational only. That's what keeps a page's URL, links, and sync path stable when you move it around the tree. See [Document folders](/concepts/document-folders).
+
+## Does my second machine need upgrading before I use workspaces?
+
+No. An older bacio can keep syncing the same sync repo without error — it just won't see workspaces, document folders, or Kanban lanes. The new data lands in new sibling files that an old binary never reads, writes, or deletes; the `repo.yaml` / `issue.yaml` / `doc.yaml` files it does read are unchanged. Upgrade it whenever you like and everything appears.
+
 ## What if I lose my laptop?
 
 If you don't sync: you've lost your kanban. The data was only ever on the laptop.

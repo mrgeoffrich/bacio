@@ -190,6 +190,18 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 | `countShippedIssues(p, sinceDays)` | `GET /repos/{p}/shipped/count?since=`, or `GET /shipped/count?…` when `p` is `''` / `'all'` (BACI-221, BACI-371) | Lean count-only sibling polled on the standard 10s `POLL_INTERVAL_MS` cadence so the topbar "Shipped · N" pill reflects the active Today / Last Week / Forever scope even when the popover is closed — and, since BACI-371, its all-repos / this-repo scope too. No `?limit=` parameter — count is total under the scope. |
 | `listProxyStats(sinceDays)` | `GET /proxy/stats?since=` (BACI-304) | The Monitor screen's per-FQDN reverse-proxy rollup. **Cross-cutting** — `proxy_requests` has no `repo_id`, so this is the rare seam method that takes no repo prefix; the endpoint is the cross-cutting sibling of `/history`, behind the bearer-token auth (outside the `/anthropic/` exemption). `sinceDays=0` is the "All-time" sentinel (omit `?since=`); a positive value maps to the rolling `?since=Nd` lookback. Reshapes the server's snake_case `ProxyFQDNStat` rows into the camelCase shape `MonitorView` consumes. Wails twin is `MonitorService.ProxyStats`. |
 | `listJobTranscripts(repo, issue, mode, sinceDays)` | `GET /proxy/jobs?repo=&issue=&mode=&since=` (BACI-322) | The Monitor Transcript page's row-per-dispatch list. Unlike `listProxyStats` this **is** active-repo scoped — `proxy_messages` has no `repo_id`, but each dispatch resolves to a repo prefix, so `repo` (the URL prefix) drives the scope and `issue` / `mode` narrow further. `sinceDays=0` is the "All-time" sentinel. Reshapes the snake_case `JobTranscriptRow` rows into the camelCase shape `TranscriptListPanel` consumes. Wails twin is `MonitorService.ListJobTranscripts`. |
+| `addWorkspace(name, prefix?)` | `POST /workspaces` | Creates a **workspace** — a pathless, git-less `repos` row (`kind='workspace'`). A dedicated route rather than a `kind` flag on `POST /repos`: the git path requires a `path`, the workspace path forbids one, and the store rejects the impossible combination. Body is `{name, prefix?}`; an omitted prefix is derived from the name. Wails twin is `BoardService.AddWorkspace`. |
+| `listKanbanColumns(prefix)` | `GET /repos/{p}/kanban/columns` | The Kanban lanes with their ordered `cards: [{key, position}]`. `cards` is **always present** (`[]` for an empty lane). Membership rides on the lane, so there is no per-issue lane field to fetch. |
+| `createKanbanColumn(prefix, name)` | `POST /repos/{p}/kanban/columns` | 201 with the new lane, appended to the right. 409 on a duplicate name in the repo. |
+| `renameKanbanColumn(prefix, uuid, name)` / `reorderKanbanColumn(prefix, uuid, position)` | `PATCH /repos/{p}/kanban/columns/{uuid}` | One route, a **presence map** body: the key that is present selects the operation (`{name}` renames, `{position}` reorders). Both-or-neither is a 400. `reorderKanbanColumn` re-reads the board afterwards — see §2a of [`frontend-architecture.md`](frontend-architecture.md). |
+| `previewDeleteKanbanColumn` / `deleteKanbanColumn(prefix, uuid)` | `DELETE /repos/{p}/kanban/columns/{uuid}` (`?dry_run=true` for the preview) | The dry run answers 200 with `KanbanColumnDeletePreview` and `X-Dry-Run: applied`; the real delete answers 204. Deleting a lane takes its cards **off the board**; the issues survive. |
+| `moveIssueToKanbanColumn(prefix, key, columnUuid, position)` | `PUT /repos/{p}/issues/{key}/kanban` | The drag-drop write. `column_uuid: ""` takes the card off the board — the only way to un-opt a git-repo card — so the key is always sent, never omitted. `position` **absent** means append; `0` means top of the lane. The PUT answers with the moved issue, so the seam re-reads the board. |
+| `listDocFolders(prefix)` | `GET /repos/{p}/doc-folders` | Every folder of the page tree, flat; the client assembles the hierarchy. Always an array, never `null`. The wire carries a numeric `parent_id`; the reshaper resolves it to `parentUuid`. |
+| `createDocFolder(prefix, name, parentUuid)` | `POST /repos/{p}/doc-folders` | Body `{name, parent_uuid?}`; `parent_uuid: ""` (or absent) is the tree root. 409 on a sibling-name collision or a depth-cap breach. |
+| `renameDocFolder(prefix, uuid, name)` / `moveDocFolder(prefix, uuid, newParentUuid)` | `PATCH /repos/{p}/doc-folders/{uuid}` | Same presence-map shape as the lane PATCH: `{name}` renames, `{parent_uuid}` re-parents (present-but-empty ⇒ promote to root). 409 on a cycle — a folder can't move inside its own descendant. |
+| `previewDeleteDocFolder` / `deleteDocFolder(prefix, uuid)` | `DELETE /repos/{p}/doc-folders/{uuid}` (`?dry_run=true` for the preview) | Preview → 200 `DocFolderDeletePreview` (descendant folder count + pages re-rooted); real delete → 204. A folder delete **never destroys a page** — `documents.folder_id` is `ON DELETE SET NULL`, so its pages fall back to the root. |
+| `moveDocToFolder(prefix, filename, folderUuid, position)` | `PUT /repos/{p}/documents/{filename}/folder` | `folder_uuid: ""` moves the page to the tree root. Documents stay addressed by **filename** — folders are organisational metadata only, `UNIQUE(repo_id, filename)` is untouched, and no URL, CLI verb or sync path changes because a page moved. |
+| `createDoc` / `renameDoc` / `deleteDoc` | `POST /repos/{p}/documents`, `POST /repos/{p}/documents/{filename}/rename`, `DELETE /repos/{p}/documents/{filename}` | The Documents page can create, rename and delete pages on both transports. `createDoc` requires a non-empty body — the route mirrors `bacio doc add` and 400s on an empty one. |
 
 ---
 
@@ -396,8 +408,21 @@ truth for the active repo** — `App` derives the active repo from
 `location.pathname` rather than from `localStorage`.
 
 - **The route map** (every page nested under the `/:prefix` segment):
-  - `/:prefix/pipeline` → the Pipeline view (the driving surface).
-  - `/:prefix/issues/:key` → `IssueWorkspace` for that key.
+  - `/:prefix/pipeline` → the **Agentic Pipeline** view (the agent-driving
+    surface, keyed on issue `state`). The nav *label* reads "Agentic
+    Pipeline"; the view id stays `'pipeline'`, which is load-bearing in
+    `routes.ts`, `App.tsx`, `RepoProvider` and the `is-pipeline` class.
+    The entry is **hidden for a workspace** — no working tree means nowhere
+    for a dispatched worker to run — and `homeView()` lands a workspace on
+    the Kanban instead.
+  - `/:prefix/issues` → the **Kanban** board (`KanbanBoard`), the human-lane
+    axis keyed on `issues.kanban_column_id`. The nav view id is `board` and
+    `viewPath('board')` has always mapped to `/issues` (matching the tab
+    label); the route is what was vestigial. Orthogonal to the Pipeline: a
+    card renders here **iff** it belongs to a lane, which is what stops the
+    same card appearing on both pages by accident.
+  - `/:prefix/issues/:key` → `IssueWorkspace` for that key. react-router
+    ranks it above the Kanban list route above it.
   - `/:prefix/features`, `/:prefix/features/:slug` → `FeaturesView`
     with the slug pre-selected when present.
   - `/:prefix/documents`, `/:prefix/documents/:slug` → `DocsView` with
@@ -491,10 +516,14 @@ truth for the active repo** — `App` derives the active repo from
   addressable state, and don't belong on a shareable URL. The URL
   carries only the path.
 - **Topbar derives the active view from `useLocation`.** The
-  segmented `Pipeline / Features / Documents / Agents / History / Monitor`
-  buttons highlight the matching segment via `viewFromPath`, which
-  skips the leading prefix segment before classifying
+  segmented `Agentic Pipeline / Kanban / Features / Documents / Agents /
+  History / Monitor` buttons highlight the matching segment via
+  `viewFromPath`, which skips the leading prefix segment before classifying
   (`/BACI/issues/...` → `board`, `/BACI/features/...` → `features`, ...).
+  `navForKind(kind)` is what the Topbar actually renders — it drops the
+  Pipeline entry for a workspace. It is exported and consumed by `App` too,
+  because the digit hotkeys map onto the list **by position**; filtering in
+  only one place would silently desync the keyboard from the buttons.
   The breadcrumb pill that surfaces while the workspace route is mounted
   reads the key off the path directly (`/<prefix>/issues/:key`), then
   calls `navigate(-1)` on click — the browser back stack handles the
@@ -540,9 +569,14 @@ When you go to extend or fix this, the relevant files are:
   - `desktop/frontend/src/components/Topbar.jsx` — `NAV` is identical
     in both modes; the leader chip renders whenever the elector
     reports we hold the lease, regardless of build target.
-  - `desktop/frontend/src/components/RepoPicker.jsx` — Add Repository
-    pops the native folder picker in desktop mode and a path-input
-    modal in web mode (the modal POSTs to `/repos`).
+  - `desktop/frontend/src/components/RepoPicker.tsx` — a two-option add
+    menu. **Add Git Repository…** forks on `WEB_MODE`: the native folder
+    picker in desktop mode, a path-input modal POSTing to `/repos` in web
+    mode. **New Workspace…** does *not* fork — a workspace is pathless, so
+    there is nothing native to invoke and the same
+    `components/workspace/WorkspaceCreateModal` collects `{name, prefix?}`
+    on both transports and calls `api.addWorkspace`. The picker list is
+    grouped by kind with a badge.
   - `desktop/frontend/src/components/SettingsView.jsx` — every
     template affordance (body textarea, state chips, Reset body,
     Reset gate, toolbar Add / Restore built-ins, per-template Rename

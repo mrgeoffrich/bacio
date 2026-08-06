@@ -30,6 +30,7 @@ The file is only created if you've enabled [git-backed sync](/guides/sync-across
 
 | Variable | Effect |
 |---|---|
+| `BACIO_REPO` | Project prefix to operate on; same as `--repo`. Short-circuits the walk-up-to-`.git` detection entirely. The only way to reach a [workspace](/concepts/workspaces), which has no working tree to detect. Case-insensitive; a lookup, never a create. |
 | `BACIO_REMOTE` | URL of a `bacio api` server; same as `--remote`. When set, `bacio` calls go through HTTP instead of the local DB. |
 | `BACIO_API_TOKEN` | Bearer token for the remote API; same as `--token`. |
 

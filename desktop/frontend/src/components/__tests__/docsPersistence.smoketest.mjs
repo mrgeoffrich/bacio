@@ -37,8 +37,11 @@ const {
   persistSort,
   readSidebarCollapsed,
   persistSidebarCollapsed,
+  readExpandedFolders,
+  persistExpandedFolders,
   SORT_KEY_KEY,
   SIDEBAR_COLLAPSED_KEY,
+  EXPANDED_FOLDERS_KEY,
   DEFAULT_SORT,
 } = await import(path.join(moduleRoot, 'DocsPersistence.ts'));
 
@@ -48,6 +51,7 @@ function test(name, fn) { tests.push({ name, fn }); }
 test('storage keys are kebab-cased bacio-prefixed', () => {
   assert.equal(SORT_KEY_KEY, 'bacio-docs-sort');
   assert.equal(SIDEBAR_COLLAPSED_KEY, 'bacio-docs-sidebar-collapsed');
+  assert.equal(EXPANDED_FOLDERS_KEY, 'bacio-docs-expanded-folders');
 });
 
 // ---- sort (per-repo) ----
@@ -108,6 +112,46 @@ test('persistSidebarCollapsed swallows a setItem throw without raising', () => {
   globalThis.localStorage = makeStorageStub({ setThrows: true });
   // Must not throw; the preference just won't survive the next reload.
   persistSidebarCollapsed(true);
+});
+
+// ---- expandedFolders (per-repo, keyed by folder uuid) ----
+
+test('readExpandedFolders returns an empty list when unset', () => {
+  globalThis.localStorage = makeStorageStub();
+  assert.deepEqual(readExpandedFolders('BACI'), []);
+});
+
+test('persistExpandedFolders round-trips uuids per repo', () => {
+  globalThis.localStorage = makeStorageStub();
+  persistExpandedFolders('BACI', ['u-arch', 'u-store']);
+  persistExpandedFolders('MINI', ['u-other']);
+  assert.deepEqual(readExpandedFolders('BACI'), ['u-arch', 'u-store']);
+  assert.deepEqual(readExpandedFolders('MINI'), ['u-other']);
+});
+
+test('persisting an empty list trims the repo back out of the map', () => {
+  globalThis.localStorage = makeStorageStub();
+  persistExpandedFolders('BACI', ['u-arch']);
+  persistExpandedFolders('BACI', []);
+  assert.deepEqual(JSON.parse(globalThis.localStorage.store.get(EXPANDED_FOLDERS_KEY)), {});
+});
+
+test('readExpandedFolders ignores garbage on disk', () => {
+  globalThis.localStorage = makeStorageStub();
+  globalThis.localStorage.store.set(EXPANDED_FOLDERS_KEY, JSON.stringify({ BACI: 'not-an-array' }));
+  assert.deepEqual(readExpandedFolders('BACI'), []);
+  globalThis.localStorage.store.set(EXPANDED_FOLDERS_KEY, JSON.stringify({ BACI: ['ok', 7, '', null] }));
+  assert.deepEqual(readExpandedFolders('BACI'), ['ok']);
+});
+
+test('readExpandedFolders falls back to empty when getItem throws', () => {
+  globalThis.localStorage = makeStorageStub({ getThrows: true });
+  assert.deepEqual(readExpandedFolders('BACI'), []);
+});
+
+test('persistExpandedFolders swallows a setItem throw without raising', () => {
+  globalThis.localStorage = makeStorageStub({ setThrows: true });
+  persistExpandedFolders('BACI', ['u-arch']); // must not throw
 });
 
 // ---- hardened storage on sort ----

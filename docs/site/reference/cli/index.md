@@ -13,13 +13,15 @@ bacio's CLI is the same surface that agents drive — every mutating command acc
 |---|---|
 | [`bacio init`](/reference/cli/init) | Bind the current git repo to a 4-letter prefix. |
 | [`bacio repo`](/reference/cli/repo) | List, show, or remove tracked repos. |
+| [`bacio workspace`](/reference/cli/workspace) | Create, list, and remove [workspaces](/concepts/workspaces) — projects with no git working tree. |
 | [`bacio feature`](/reference/cli/feature) | Manage features (groups of issues). Includes `plan` for dependency-ordered execution. |
 | [`bacio issue`](/reference/cli/issue) | Manage issues — add, list, show, brief, edit, state, assign, unassign, next, peek, rm. |
+| [`bacio kanban`](/reference/cli/kanban) | Manage the human work board — lanes, and which lane a card sits in. |
 | [`bacio comment`](/reference/cli/comment) | Add and list issue comments. |
 | [`bacio link`](/reference/cli/link) / `bacio unlink` | Create / remove typed issue relations (`blocks`, `relates-to`, `duplicate-of` — stored as `blocks`, `relates_to`, `duplicate_of`). |
 | [`bacio pr`](/reference/cli/pr) | Attach, detach, and list pull requests on an issue. |
 | [`bacio tag`](/reference/cli/tag) | Add or remove tags on issues. |
-| [`bacio doc`](/reference/cli/doc) | Manage per-repo text documents and their links to issues / features. |
+| [`bacio doc`](/reference/cli/doc) | Manage per-repo text documents, their [folder tree](/concepts/document-folders), and their links to issues / features. |
 | [`bacio agent`](/reference/cli/agent) | Track live AI-agent sessions and their issue claims (local-only registry). |
 | [`bacio status`](/reference/cli/status) | One-screen summary of the current repo. |
 | [`bacio history`](/reference/cli/history) | Query the audit log of mutations. |
@@ -38,6 +40,7 @@ All commands inherit these from the root:
 | Flag | Default | What it does |
 |---|---|---|
 | `-o`, `--output` | `text` | Output format — `text` for humans, `json` for agents and scripts. |
+| `--repo` | resolved from `cwd` | Operate on this project prefix instead of walking up from the current directory to a `.git` toplevel. Case-insensitive; falls back to `BACIO_REPO`. **Required for [workspaces](/concepts/workspaces)** — they have no working tree to detect. A lookup, never a create: an unknown prefix errors rather than registering one. |
 | `--db` | `~/.bacio/db.sqlite` | Override the database path. Useful for tests and isolated experiments. |
 | `--dry-run` | off | Validate the request and emit the projected result without writing. No audit log entry. |
 | `--remote` | — | Talk to a `bacio api` server at this URL instead of the local DB. Falls back to `BACIO_REMOTE`. |

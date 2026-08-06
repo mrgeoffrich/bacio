@@ -72,6 +72,18 @@ body { margin: 0; }
 .mk-icon svg { width: 100%; height: 100%; display: block; }
 
 /* ---------- Board ---------- */
+/* The Kanban page shell: the scrolling lane grid plus the (rare) whole-board
+   empty hint below it. A flex column so .mk-board keeps the `flex: 1` it has
+   always relied on from being a direct child of .mk-app. */
+.mk-kanban {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+}
+.mk-kanban-hint {
+  flex: none;
+  padding: 0 24px 20px;
+  font-family: var(--font-sans); font-size: 13px; color: var(--fg-3);
+  text-align: center;
+}
 .mk-board {
   flex: 1; display: grid;
   /* BACI-78: max-content auto-columns let each track shrink-wrap its
@@ -97,6 +109,11 @@ body { margin: 0; }
   font-family: var(--font-mono); font-size: 10px; font-weight: 500;
   letter-spacing: .06em; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;
 }
+/* A Kanban lane's name pill. The pre-pivot board painted .mk-col-pill with a
+   per-state colour (.mk-status-todo / -doing / …) because its columns WERE
+   issue states; a lane is a user-created row with an arbitrary name and no
+   state to key a colour off, so it wears the neutral chip instead. */
+.mk-col-pill.is-lane { background: var(--bg-4); color: var(--fg-2); }
 .mk-col-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
 /* BACI-191: per-column compact-cards toggle. Sits between the count
    and the collapse chevron (reading order: pill → count → compact →
@@ -177,6 +194,44 @@ body { margin: 0; }
 }
 .mk-col-expand-btn:hover { background: var(--bg-4); color: var(--fg-1); }
 .mk-col-expand-btn .mk-icon { width: 14px; height: 14px; }
+/* Phase 7B: the two lane-header CRUD triggers — "+" (put issues on this
+   lane) and "⋯" (rename / reorder / delete). Same 22px mute chiclet as
+   .mk-col-compact-btn / .mk-col-collapse-btn so the header reads as one
+   row of affordances rather than two vocabularies. Both are Radix
+   dropdown triggers, so [data-state="open"] holds the hover treatment
+   while their popover is up. */
+.mk-col-add-btn, .mk-col-menu-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  background: transparent; border: 0; padding: 0;
+  border-radius: 4px; color: var(--fg-3); cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-col-add-btn:hover, .mk-col-menu-btn:hover,
+.mk-col-add-btn[data-state="open"], .mk-col-menu-btn[data-state="open"] {
+  background: var(--bg-4); color: var(--fg-1);
+}
+/* Phase 7B: the trailing "Add lane" slot at the right-hand end of the
+   grid. It doubles as the whole-board empty state — a repo with no lanes
+   renders the grid with only this in it, so the board is never a dead
+   end. Dashed and unfilled so it reads as a slot to fill, not a lane
+   that already exists. */
+.mk-col-add-lane {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px;
+  width: 200px;
+  background: transparent;
+  border: 1px dashed var(--border-2); border-radius: var(--radius-lg);
+  color: var(--fg-3); cursor: pointer;
+  font-family: var(--font-sans); font-size: 13px;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-col-add-lane:hover {
+  background: var(--bg-3); border-color: var(--coral-300); color: var(--fg-1);
+}
 
 /* ---------- Status pills ---------- */
 .mk-status-todo    { background: var(--status-todo-bg);    color: var(--status-todo); }
@@ -566,6 +621,37 @@ body { margin: 0; }
    affordance as mouse hover. */
 [data-dispatch-row][data-active="true"] {
   background: var(--bg-4);
+}
+
+/* Phase 7B: the Kanban lane's "add cards" popover. It wears the
+   .mk-dispatch-menu shell above (sticky search row + scroll region +
+   sticky footer) and the command palette's .mk-palette-item rows, so the
+   only thing it needs of its own is width: its rows carry an issue key
+   AND a title, where the dispatch menu's carried one short mode label. */
+.mk-kanban-add-menu { min-width: 330px; max-width: 420px; }
+
+/* Phase 7B: the lane create / rename / delete dialog bodies. Same stack
+   as the Documents dialogs, kept under a Kanban-owned name rather than
+   borrowing a docs-named class. The error line is the load-bearing bit:
+   a store refusal (a duplicate lane name) is rendered NEXT TO the input,
+   because routing it to the global modal would close the dialog and lose
+   what was typed. */
+.mk-lane-dialog { display: flex; flex-direction: column; gap: 12px; }
+.mk-lane-dialog-subject {
+  margin: 0;
+  font-family: var(--font-mono); font-size: 13px; color: var(--fg-1);
+  word-break: break-all;
+}
+.mk-lane-dialog-lines {
+  margin: 0; padding-left: 18px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--fg-3);
+}
+.mk-lane-dialog-error {
+  margin: 0; padding: 8px 10px;
+  font-size: 12px;
+  color: var(--status-blocked); background: var(--status-blocked-bg);
+  border-radius: var(--radius-sm);
 }
 
 /* BACI-241: the follow-on popup splits the prompt list into

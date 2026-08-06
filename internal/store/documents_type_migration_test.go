@@ -98,6 +98,26 @@ func TestMigrateDocumentsTypeCheck(t *testing.T) {
 		t.Fatalf("legacy row count = %d, want 1", n)
 	}
 
+	// The rebuild above re-creates `documents` from a hard-coded CREATE
+	// plus an explicit column list, so it drops the pivot's folder_id /
+	// folder_position columns — precisely the ordering hazard the pivot
+	// ALTERs are pinned to the END of migrate() to survive. Open() always
+	// runs the whole of migrate(), so the columns come straight back; do
+	// the same here before exercising the store API, whose docCols now
+	// projects them.
+	if err := migrate(s.DB); err != nil {
+		t.Fatalf("migrate after the documents rebuild: %v", err)
+	}
+	for _, col := range []string{"folder_id", "folder_position"} {
+		has, err := columnExists(s.DB, "documents", col)
+		if err != nil {
+			t.Fatalf("columnExists(documents, %s): %v", col, err)
+		}
+		if !has {
+			t.Fatalf("documents.%s missing after the rebuild + migrate(); the pivot ALTERs must stay at the end of migrate()", col)
+		}
+	}
+
 	// Each of the BACI-115 types plus the later session_retro addition
 	// inserts cleanly through the store API after the rebuild.
 	for _, tt := range []model.DocumentType{

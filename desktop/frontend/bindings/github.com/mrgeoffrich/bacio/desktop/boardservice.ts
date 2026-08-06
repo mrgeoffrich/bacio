@@ -88,6 +88,25 @@ export function AddRepository(): $CancellablePromise<$models.Board> {
 }
 
 /**
+ * AddWorkspace registers a manual workspace — a repo row with
+ * kind='workspace', no path and no remote — and returns it as a Board.
+ * 
+ * It deliberately does NOT go through AddRepository's folder picker or
+ * git.Detect: a workspace has no directory at all, so the "%q is not
+ * inside a git repository" refusal that guards the git path is exactly
+ * the wrong check here. name is required; prefix is optional — empty
+ * allocates one from the name through the same AllocatePrefix machinery
+ * a git registration uses, so workspaces and git repos share one prefix
+ * namespace. The store bootstraps the mandatory catch-all features and
+ * the starter Kanban lanes as part of the insert.
+ */
+export function AddWorkspace(name: string, prefix: string): $CancellablePromise<$models.Board> {
+    return $Call.ByID(531458801, name, prefix).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+/**
  * AnswerSessionQuestion submits the user's answer. answers is keyed
  * by question text; values are either string (single-select) or
  * []string (multi-select). The store re-validates against the
@@ -186,6 +205,15 @@ export function CountUnreadNotifications(): $CancellablePromise<number> {
 }
 
 /**
+ * CreateKanbanColumn appends a lane to the right-hand end of the board.
+ */
+export function CreateKanbanColumn(repoPrefix: string, name: string): $CancellablePromise<$models.KanbanColumnDTO> {
+    return $Call.ByID(2490330684, repoPrefix, name).then(($result: any) => {
+        return $$createType9($result);
+    });
+}
+
+/**
  * CreateRelation wires a `blocks` edge so `blocked` ends up blocked by
  * `blocker` — the Pipeline drag-to-block gesture (BACI-342). A `blocks`
  * edge is stored from = blocker, to = blocked, so the drop target (the
@@ -213,6 +241,16 @@ export function DeleteComment(repoPrefix: string, key: string, commentUUID: stri
 }
 
 /**
+ * DeleteKanbanColumn removes a lane for real and takes its cards off the
+ * board (the issues themselves survive). Returns the refreshed board.
+ */
+export function DeleteKanbanColumn(repoPrefix: string, uuid: string): $CancellablePromise<$models.KanbanColumnDTO[]> {
+    return $Call.ByID(1838124275, repoPrefix, uuid).then(($result: any) => {
+        return $$createType10($result);
+    });
+}
+
+/**
  * DispatchIssue queues a dispatch against an issue for a given job stage
  * (mode). The state-gate check and the free-agent auto-pick both live
  * on client.Client.AutoDispatchIssue (BACI-40), so the per-card button,
@@ -222,7 +260,7 @@ export function DeleteComment(repoPrefix: string, key: string, commentUUID: stri
  */
 export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(715303058, repoPrefix, issueKey, mode).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType11($result);
     });
 }
 
@@ -234,7 +272,7 @@ export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string
  */
 export function EditCardProcessTail(repoPrefix: string, key: string, stages: string[]): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(3819875786, repoPrefix, key, stages).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType14($result);
     });
 }
 
@@ -264,7 +302,7 @@ export function GetBacklogCollapsed(repoPrefix: string): $CancellablePromise<boo
  */
 export function GetBoardHiddenStates(repoPrefix: string): $CancellablePromise<$models.BoardHiddenStatesDTO> {
     return $Call.ByID(3854215019, repoPrefix).then(($result: any) => {
-        return $$createType13($result);
+        return $$createType15($result);
     });
 }
 
@@ -312,7 +350,7 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
  */
 export function GetIssueBrief(repoPrefix: string, key: string): $CancellablePromise<$models.IssueBriefDTO> {
     return $Call.ByID(836296342, repoPrefix, key).then(($result: any) => {
-        return $$createType14($result);
+        return $$createType16($result);
     });
 }
 
@@ -321,7 +359,7 @@ export function GetIssueBrief(repoPrefix: string, key: string): $CancellableProm
  */
 export function GetNotification(id: number): $CancellablePromise<model$0.Notification | null> {
     return $Call.ByID(2425668760, id).then(($result: any) => {
-        return $$createType16($result);
+        return $$createType18($result);
     });
 }
 
@@ -363,7 +401,7 @@ export function LaunchRepo(): $CancellablePromise<string> {
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
-        return $$createType18($result);
+        return $$createType20($result);
     });
 }
 
@@ -373,7 +411,7 @@ export function ListAgents(repoPrefix: string): $CancellablePromise<$models.Agen
  */
 export function ListBoards(): $CancellablePromise<$models.Board[]> {
     return $Call.ByID(3235630628).then(($result: any) => {
-        return $$createType19($result);
+        return $$createType21($result);
     });
 }
 
@@ -390,7 +428,7 @@ export function ListBoards(): $CancellablePromise<$models.Board[]> {
  */
 export function ListCards(repoPrefix: string): $CancellablePromise<$models.BoardCard[]> {
     return $Call.ByID(4181487648, repoPrefix).then(($result: any) => {
-        return $$createType20($result);
+        return $$createType22($result);
     });
 }
 
@@ -401,7 +439,17 @@ export function ListCards(repoPrefix: string): $CancellablePromise<$models.Board
  */
 export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
     return $Call.ByID(2117984856).then(($result: any) => {
-        return $$createType22($result);
+        return $$createType24($result);
+    });
+}
+
+/**
+ * ListKanbanColumns returns the repo's lanes in board order, each with
+ * its ordered card references.
+ */
+export function ListKanbanColumns(repoPrefix: string): $CancellablePromise<$models.KanbanColumnDTO[]> {
+    return $Call.ByID(3993700833, repoPrefix).then(($result: any) => {
+        return $$createType10($result);
     });
 }
 
@@ -413,7 +461,7 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
  */
 export function ListNotifications(unreadOnly: boolean, limit: number): $CancellablePromise<(model$0.Notification | null)[]> {
     return $Call.ByID(648588779, unreadOnly, limit).then(($result: any) => {
-        return $$createType23($result);
+        return $$createType25($result);
     });
 }
 
@@ -425,7 +473,7 @@ export function ListNotifications(unreadOnly: boolean, limit: number): $Cancella
  */
 export function ListRepoActivity(): $CancellablePromise<$models.RepoActivity[]> {
     return $Call.ByID(2158820232).then(($result: any) => {
-        return $$createType25($result);
+        return $$createType27($result);
     });
 }
 
@@ -442,7 +490,7 @@ export function ListRepoActivity(): $CancellablePromise<$models.RepoActivity[]> 
  */
 export function ListShipped(repoPrefix: string, sinceDays: number, sinceTs: string, limit: number): $CancellablePromise<$models.ShippedListDTO> {
     return $Call.ByID(3138957880, repoPrefix, sinceDays, sinceTs, limit).then(($result: any) => {
-        return $$createType26($result);
+        return $$createType28($result);
     });
 }
 
@@ -471,7 +519,28 @@ export function MarkCardDone(repoPrefix: string, key: string): $CancellablePromi
  */
 export function MarkNotificationRead(id: number): $CancellablePromise<model$0.Notification | null> {
     return $Call.ByID(3369062611, id).then(($result: any) => {
-        return $$createType16($result);
+        return $$createType18($result);
+    });
+}
+
+/**
+ * PreviewDeleteKanbanColumn reports how many cards a lane delete would
+ * take off the board, WITHOUT deleting anything — the dry-run behind the
+ * confirmation dialog. Pairs with DeleteKanbanColumn.
+ */
+export function PreviewDeleteKanbanColumn(repoPrefix: string, uuid: string): $CancellablePromise<$models.KanbanColumnDeletePreviewDTO> {
+    return $Call.ByID(3593400761, repoPrefix, uuid).then(($result: any) => {
+        return $$createType29($result);
+    });
+}
+
+/**
+ * RenameKanbanColumn renames a lane in place; its position and cards are
+ * untouched.
+ */
+export function RenameKanbanColumn(repoPrefix: string, uuid: string, newName: string): $CancellablePromise<$models.KanbanColumnDTO> {
+    return $Call.ByID(231160662, repoPrefix, uuid, newName).then(($result: any) => {
+        return $$createType9($result);
     });
 }
 
@@ -482,13 +551,25 @@ export function ReorderCard(repoPrefix: string, key: string, position: number): 
 }
 
 /**
+ * ReorderKanbanColumn moves a lane to `position` (0-based, clamped to
+ * the board). It returns the WHOLE refreshed board rather than the moved
+ * lane: the siblings re-densify underneath, so any caller rendering
+ * board order has to re-read them anyway.
+ */
+export function ReorderKanbanColumn(repoPrefix: string, uuid: string, position: number): $CancellablePromise<$models.KanbanColumnDTO[]> {
+    return $Call.ByID(186409269, repoPrefix, uuid, position).then(($result: any) => {
+        return $$createType10($result);
+    });
+}
+
+/**
  * RerunCardJob re-runs an aborted (cancelled) job at the given 1-based
  * sequence — the BACI-291 per-job Re-run control. Returns the refreshed
  * chain.
  */
 export function RerunCardJob(repoPrefix: string, key: string, seq: number): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(1469568566, repoPrefix, key, seq).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType14($result);
     });
 }
 
@@ -504,7 +585,7 @@ export function RerunCardJob(repoPrefix: string, key: string, seq: number): $Can
  */
 export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(233478750, dispatchID).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType11($result);
     });
 }
 
@@ -517,7 +598,7 @@ export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.
  */
 export function ResetCardProcess(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(2278414531, repoPrefix, key).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType14($result);
     });
 }
 
@@ -531,7 +612,7 @@ export function ResetCardProcess(repoPrefix: string, key: string): $CancellableP
  */
 export function SendSessionMessage(sessionID: string, body: string): $CancellablePromise<model$0.UserMessage | null> {
     return $Call.ByID(23283136, sessionID, body).then(($result: any) => {
-        return $$createType28($result);
+        return $$createType31($result);
     });
 }
 
@@ -557,7 +638,7 @@ export function SetBacklogCollapsed(repoPrefix: string, collapsed: boolean): $Ca
  */
 export function SetBoardHiddenStates(repoPrefix: string, states: string[]): $CancellablePromise<$models.BoardHiddenStatesDTO> {
     return $Call.ByID(1989240775, repoPrefix, states).then(($result: any) => {
-        return $$createType13($result);
+        return $$createType15($result);
     });
 }
 
@@ -575,7 +656,7 @@ export function SetCardEngineMode(repoPrefix: string, key: string, mode: string)
  */
 export function SetCardProcess(repoPrefix: string, key: string, process: string, stages: string[]): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(3410649082, repoPrefix, key, process, stages).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType14($result);
     });
 }
 
@@ -599,6 +680,25 @@ export function SetImpactPrimary(repoPrefix: string, impactPrimary: boolean): $C
 }
 
 /**
+ * SetIssueKanbanColumn places a card on the Kanban — the drag-drop
+ * write. columnUUID == "" takes the card OFF the board entirely; that
+ * empty string is the only way to un-opt a git-repo card, so it is a
+ * meaningful value rather than a missing argument.
+ * 
+ * position is the 0-based top-to-bottom slot in the target lane; pass
+ * null to append to the end. Both the source and the target lane
+ * re-densify to 0..n-1 around the move, so this returns the WHOLE
+ * refreshed board rather than the moved card — the card DTO has nowhere
+ * to carry a lane, and the caller needs the neighbours' new slots
+ * regardless.
+ */
+export function SetIssueKanbanColumn(repoPrefix: string, key: string, columnUUID: string, position: number | null): $CancellablePromise<$models.KanbanColumnDTO[]> {
+    return $Call.ByID(3529580867, repoPrefix, key, columnUUID, position).then(($result: any) => {
+        return $$createType10($result);
+    });
+}
+
+/**
  * SetIssueState changes an issue's state and returns the refreshed card.
  * It backs the board's drag-to-move: dropping a card in a new column
  * persists the state change so it survives the next auto-refresh poll.
@@ -619,13 +719,13 @@ export function ShipCard(repoPrefix: string, key: string): $CancellablePromise<$
 
 export function StartCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(2998495872, repoPrefix, key).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType14($result);
     });
 }
 
 export function StopCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(39478934, repoPrefix, key).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType14($result);
     });
 }
 
@@ -686,23 +786,26 @@ const $$createType5 = model$0.Issue.createFrom;
 const $$createType6 = $Create.Nullable($$createType5);
 const $$createType7 = $models.PRDTO.createFrom;
 const $$createType8 = $models.DefaultFeatureDTO.createFrom;
-const $$createType9 = agentcards$0.DispatchDTO.createFrom;
-const $$createType10 = model$0.PipelineJob.createFrom;
-const $$createType11 = $Create.Nullable($$createType10);
-const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = $models.BoardHiddenStatesDTO.createFrom;
-const $$createType14 = $models.IssueBriefDTO.createFrom;
-const $$createType15 = model$0.Notification.createFrom;
-const $$createType16 = $Create.Nullable($$createType15);
-const $$createType17 = agentcards$0.AgentCard.createFrom;
-const $$createType18 = $Create.Array($$createType17);
-const $$createType19 = $Create.Array($$createType2);
-const $$createType20 = $Create.Array($$createType1);
-const $$createType21 = $models.BoardColumn.createFrom;
-const $$createType22 = $Create.Array($$createType21);
-const $$createType23 = $Create.Array($$createType16);
-const $$createType24 = $models.RepoActivity.createFrom;
-const $$createType25 = $Create.Array($$createType24);
-const $$createType26 = $models.ShippedListDTO.createFrom;
-const $$createType27 = model$0.UserMessage.createFrom;
-const $$createType28 = $Create.Nullable($$createType27);
+const $$createType9 = $models.KanbanColumnDTO.createFrom;
+const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = agentcards$0.DispatchDTO.createFrom;
+const $$createType12 = model$0.PipelineJob.createFrom;
+const $$createType13 = $Create.Nullable($$createType12);
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = $models.BoardHiddenStatesDTO.createFrom;
+const $$createType16 = $models.IssueBriefDTO.createFrom;
+const $$createType17 = model$0.Notification.createFrom;
+const $$createType18 = $Create.Nullable($$createType17);
+const $$createType19 = agentcards$0.AgentCard.createFrom;
+const $$createType20 = $Create.Array($$createType19);
+const $$createType21 = $Create.Array($$createType2);
+const $$createType22 = $Create.Array($$createType1);
+const $$createType23 = $models.BoardColumn.createFrom;
+const $$createType24 = $Create.Array($$createType23);
+const $$createType25 = $Create.Array($$createType18);
+const $$createType26 = $models.RepoActivity.createFrom;
+const $$createType27 = $Create.Array($$createType26);
+const $$createType28 = $models.ShippedListDTO.createFrom;
+const $$createType29 = $models.KanbanColumnDeletePreviewDTO.createFrom;
+const $$createType30 = model$0.UserMessage.createFrom;
+const $$createType31 = $Create.Nullable($$createType30);

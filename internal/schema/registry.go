@@ -78,6 +78,21 @@ var Registry = []Entry{
 	{"repo.rm", repoRmDescription, typeOf[inputs.RepoRmInput](), inputs.ExampleRepoRm},
 	{"repo.link", "Link a phantom repo (a sync_clone-imported row with no local path) to a local working tree (BACI-112). Resolves the owning sync repo by walking the sync_remotes registry, runs UpgradePhantomRepo, then writes .bacio/config.yaml with the sync remote URL. Idempotent: re-linking to the same path is a no-op.", typeOf[inputs.RepoLinkInput](), inputs.ExampleRepoLink},
 
+	{"workspace.add", "Create a WORKSPACE: a repo row with kind='workspace' and no working tree, for tracked work that isn't a git checkout. It holds issues, documents, doc folders and a Kanban board exactly as a git repo does; the create seeds the mandatory catch-all features and the starter board (Backlog/Doing/Waiting/Done). `prefix` is optional — omit it and bacio allocates a 4-character one from `name` through the same machinery a git registration uses, so workspaces and git repos share one prefix namespace. Because a workspace has no path, it can NEVER be resolved from the current directory: every later command that targets it needs the global `--repo <PREFIX>` selector (or $BACIO_REPO). Filesystem-shaped verbs (agent dispatch, sync setup, doc export, doc add --from-path) refuse a workspace with a message saying why.", typeOf[inputs.WorkspaceAddInput](), inputs.ExampleWorkspaceAdd},
+	{"workspace.rm", workspaceRmDescription, typeOf[inputs.WorkspaceRmInput](), inputs.ExampleWorkspaceRm},
+
+	{"doc.folder.add", "Create a document folder. `parent` is the slash DISPLAY PATH of the containing folder (\"Design/API\"); omit it or pass \"\" to create at the TREE ROOT — the root is not itself a folder, so \"\" is the only way to name it. Path segments are matched exactly and are case-sensitive. Folders are purely organisational: a document's filename stays flat and globally unique per repo, so URLs, links and the on-disk sync layout are unaffected by the tree.", typeOf[inputs.DocFolderAddInput](), inputs.ExampleDocFolderAdd},
+	{"doc.folder.rename", "Rename a document folder in place. `path` is the folder's slash display path; `name` is the new LEAF name (a single segment — a rename does not move the folder, so use doc.folder.mv for that). Documents and subfolders are untouched.", typeOf[inputs.DocFolderRenameInput](), inputs.ExampleDocFolderRename},
+	{"doc.folder.mv", "Re-parent a document folder; its whole subtree moves with it. `to` is REQUIRED but may be empty: \"\" re-roots the folder at the top of the tree. Because \"\" is a real destination, the decoder checks the key's PRESENCE — omitting `to` is an error, not an implicit re-root. Cycles (moving a folder inside its own subtree) and the nesting depth cap are enforced inside the store transaction, so they can refuse a move that a --dry-run projected.", typeOf[inputs.DocFolderMvInput](), inputs.ExampleDocFolderMv},
+	{"doc.folder.rm", "Delete a document folder. Descendant folders go with it; every document anywhere in that subtree is RE-ROOTED, never deleted — losing a folder must never lose a page. Rehearse with --dry-run to read both counts (subfolders, documents_re_rooted) before committing.", typeOf[inputs.DocFolderRmInput](), inputs.ExampleDocFolderRm},
+	{"doc.mv", "File a document into a doc folder. The filename does NOT change — folders are metadata, so links, URLs and the sync layout are untouched. `folder` is REQUIRED but may be empty: \"\" files the document at the TREE ROOT (the way to un-file a page), and the decoder checks the key's presence so an omitted `folder` is an error rather than an implicit re-root. `position` is a loose SORT KEY, not a dense index — siblings may share one and listings tie-break on filename; omit it to append after the folder's current members.", typeOf[inputs.DocMvInput](), inputs.ExampleDocMv},
+
+	{"kanban.column.add", "Add a lane to the right-hand end of the repo's Kanban board. The Kanban is a SEPARATE AXIS from an issue's `state` and from the Agentic Pipeline: a card is on the board if and only if it sits in a lane. Lane names are unique per repo and are how every other kanban verb addresses a lane.", typeOf[inputs.KanbanColumnAddInput](), inputs.ExampleKanbanColumnAdd},
+	{"kanban.column.rename", "Rename a Kanban lane. `column` names the existing lane, `name` is what it becomes. Cards keep their lane membership and their order.", typeOf[inputs.KanbanColumnRenameInput](), inputs.ExampleKanbanColumnRename},
+	{"kanban.column.mv", "Reorder a Kanban lane left/right. `position` is 0-BASED and dense: 0 is the leftmost lane, and the other lanes re-densify around the moved one so the board is always a gapless 0..n-1. Out-of-range values are clamped. Only the moved lane is returned — the siblings shift underneath it, so re-read the lane list for the new board order. (Note `issue.reorder`, which orders cards within a Pipeline band, is 1-based; these are different surfaces.)", typeOf[inputs.KanbanColumnMvInput](), inputs.ExampleKanbanColumnMv},
+	{"kanban.column.rm", "Delete a Kanban lane. Every card in it comes OFF the board (kanban_column_id back to NULL); the issues themselves are never deleted and their state is untouched. Rehearse with --dry-run to see how many cards would come off.", typeOf[inputs.KanbanColumnRmInput](), inputs.ExampleKanbanColumnRm},
+	{"kanban.move", "Place one card on the Kanban board. `column` is REQUIRED but may be empty: \"\" takes the card OFF the board entirely — the only way to un-opt a card. Because \"\" is a real destination, the decoder checks the key's PRESENCE, so an omitted `column` is an error rather than a silent off-board sweep. `position` is the 0-based top-to-bottom slot in the target lane and the lane re-densifies to 0..n-1 around it; omit it to append to the bottom. This changes ONLY the card's lane — state, feature, assignee and Pipeline chain are untouched.", typeOf[inputs.KanbanMoveInput](), inputs.ExampleKanbanMove},
+
 	{"agent.register", "Register (or refresh) an AI-agent session against the current repo.", typeOf[inputs.AgentRegisterInput](), inputs.ExampleAgentRegister},
 	{"agent.heartbeat", "Bump last_seen_at on an existing agent session (optional — register / claim / release already bump it).", typeOf[inputs.AgentHeartbeatInput](), inputs.ExampleAgentHeartbeat},
 	{"agent.end", "End an agent session and auto-release every open claim it holds (unassigning any issue left with no open claims). Each cascaded release leaves its issue's state alone unless `state_on_orphan` is set (BACI-300 retired the in_progress default — a claim is a focus marker, not a state move).", typeOf[inputs.AgentEndInput](), inputs.ExampleAgentEnd},
@@ -129,13 +144,32 @@ var Registry = []Entry{
 // `bacio schema show repo.rm` and `GET /schema/repo.rm`. Kept as a const
 // so the wording is the same for every consumer of the schema.
 const repoRmDescription = "DESTRUCTIVE & IRREVERSIBLE. Deletes a repo and ALL of its issues, " +
-	"comments, features, documents, document links, issue relations, PR " +
-	"attachments, TUI settings, and history rows. There is no undo. " +
-	"Requires `confirm` to exactly match the target repo's prefix " +
+	"comments, features, documents, document links, document folders, " +
+	"Kanban lanes, issue relations, PR attachments, tags, TUI settings, " +
+	"repo settings, agent sessions, agent dispatches, agent channels, " +
+	"parked user messages, notifications, and history rows. There is no " +
+	"undo. Requires `confirm` to exactly match the target repo's prefix " +
 	"(case-insensitive). Without it the CLI returns the impact preview " +
 	"and errors out — agents driving bacio MUST stop and ask the user to " +
 	"approve before re-running with `confirm` set. Always run with " +
 	"`--dry-run` first to inspect the cascade."
+
+// workspaceRmDescription is repoRmDescription's twin for the
+// workspace-only verb. Same backend call, same gate, same cascade — the
+// only difference is that this verb refuses a git repo, so the wording
+// says so and points at the right command.
+const workspaceRmDescription = "DESTRUCTIVE & IRREVERSIBLE. Deletes a WORKSPACE and ALL of its " +
+	"issues, comments, features, documents, document links, document " +
+	"folders, Kanban lanes, issue relations, PR attachments, tags, TUI " +
+	"settings, repo settings, agent sessions, agent dispatches, agent " +
+	"channels, parked user messages, notifications, and history rows. " +
+	"There is no undo. Identical cascade to `repo.rm`, and it uses the " +
+	"same backend call and the same gate: `confirm` must exactly match " +
+	"the target prefix (case-insensitive), and without it the call " +
+	"returns the impact preview and errors out — agents driving bacio " +
+	"MUST stop and ask the user to approve before re-running with " +
+	"`confirm` set. Refuses a git repo (use `repo.rm` for those). Always " +
+	"run with `--dry-run` first to inspect the cascade."
 
 // Find looks up a registry entry by its dotted name.
 func Find(name string) (Entry, bool) {

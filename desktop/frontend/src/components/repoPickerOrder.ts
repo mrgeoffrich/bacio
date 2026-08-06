@@ -32,6 +32,31 @@ export function rankRepos(boards: Board[], byPrefix: Map<string, RepoActivity>):
   });
 }
 
+// RepoGroups is the picker list split into its two kinds. Both arrays
+// preserve the order of the input array verbatim.
+export type RepoGroups = { git: Board[]; workspaces: Board[] };
+
+// groupReposByKind partitions an already-ordered board list into git
+// repos and workspaces (the pivot's `repos.kind` discriminator). Repos
+// and workspaces share one prefix namespace and one picker list, so the
+// menu renders them as two labelled sections rather than one
+// undifferentiated run of rows.
+//
+// This is deliberately a *partition*, not a sort: RepoPicker freezes the
+// rankRepos order when the menu opens so a poll tick can't reshuffle rows
+// under the cursor, and a stable partition preserves that frozen order
+// inside each section. `kind` never changes for a live board, so a poll
+// can't move a row between sections either.
+export function groupReposByKind(boards: Board[]): RepoGroups {
+  const git: Board[] = [];
+  const workspaces: Board[] = [];
+  for (const b of boards) {
+    if (b.kind === 'workspace') workspaces.push(b);
+    else git.push(b);
+  }
+  return { git, workspaces };
+}
+
 // activityTime is the sortable epoch-ms form of a repo's last activity.
 // A missing entry, a missing timestamp, and an unparseable one all
 // collapse to -Infinity so those repos sort last rather than jumping to

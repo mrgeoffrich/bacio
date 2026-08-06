@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
@@ -156,11 +157,39 @@ func resolveSyncRepoRoot() (string, bool) {
 	return info.Root, true
 }
 
+// repoSelector returns the explicit repo/workspace prefix the caller
+// picked: the global `--repo` flag, falling back to $BACIO_REPO. Empty
+// means "resolve from the current working tree", which is the historical
+// behaviour and stays the default.
+//
+// This exists because a WORKSPACE (repos.kind = 'workspace') has no path
+// on disk — git.Detect can never find one, so without an explicit
+// selector there is no way to drive a workspace from the CLI at all.
+// Uppercased here so `--repo mini` and `--repo MINI` behave the same;
+// prefixes are stored uppercase.
+func repoSelector() string {
+	prefix := strings.TrimSpace(opts.repoPrefix)
+	if prefix == "" {
+		prefix = strings.TrimSpace(os.Getenv("BACIO_REPO"))
+	}
+	return strings.ToUpper(prefix)
+}
+
 // resolveRepo finds the repo row for the current working directory, creating
 // it on first use. Errors out if not inside a git repo. Used by handlers
 // that haven't migrated to the client yet; new code should prefer
 // resolveRepoC.
 func resolveRepo(s *store.Store) (*model.Repo, error) {
+	// The explicit selector short-circuits cwd detection entirely —
+	// including the sync-repo refusal and the auto-register path below.
+	// An explicitly named prefix must already exist: `--repo` is a
+	// lookup, never a create. Kept in lockstep with resolveRepoC so the
+	// two twins can't drift; `bacio tui` is the only caller today, and
+	// its own --repo flag shadows the global one, so in practice this
+	// branch fires for $BACIO_REPO.
+	if prefix := repoSelector(); prefix != "" {
+		return s.GetRepoByPrefix(prefix)
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -269,7 +298,12 @@ func matchPhantomByRemote(s *store.Store, remoteURL string) (*model.Repo, bool) 
 		return nil, false
 	}
 	for _, r := range repos {
-		if r.Path == "" && r.RemoteURL == remoteURL {
+		// IsPhantom(), not `Path == ""`: a workspace is also pathless but
+		// is NOT a phantom waiting to be paired with a checkout. In
+		// practice a workspace's remote_url is always '' and the empty
+		// guard above already filtered that, but state the intent
+		// explicitly so the invariant survives a future change.
+		if r.IsPhantom() && r.RemoteURL == remoteURL {
 			return r, true
 		}
 	}
@@ -281,6 +315,15 @@ func matchPhantomByRemote(s *store.Store, remoteURL string) (*model.Repo, bool) 
 // modes. Local backend writes the audit row inline; remote backend
 // triggers the server's POST /repos which writes the row server-side.
 func resolveRepoC(c client.Client) (*model.Repo, error) {
+	// --repo / $BACIO_REPO wins over everything, and is consumed BEFORE
+	// git.Detect: a workspace has no working tree, so cwd detection
+	// would either fail outright or — worse — auto-register whatever
+	// unrelated git repo the user happens to be standing in. When the
+	// selector is absent this function behaves exactly as it always has,
+	// auto-registration included.
+	if prefix := repoSelector(); prefix != "" {
+		return c.GetRepoByPrefix(context.Background(), prefix)
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err

@@ -137,7 +137,6 @@ func issueListCmd() *cobra.Command {
 		stateCSV        string
 		featureSlug     string
 		tags            []string
-		repoPrefix      string
 		allRepos        bool
 		withDescription bool
 		includeArchived bool
@@ -146,8 +145,14 @@ func issueListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List issues (descriptions are stripped by default; pass --with-description to include them)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --repo is the global selector now (see repoSelector). It
+			// used to be a local flag here that was ONLY read on the
+			// sync-repo branch and silently ignored everywhere else;
+			// folding it into the global one keeps the same spelling,
+			// makes it work outside a sync repo, and is the only way to
+			// list a workspace's issues (no cwd, no git.Detect).
 			if root, ok := resolveSyncRepoRoot(); ok {
-				return listIssuesFromSyncRepo(root, repoPrefix, allRepos, stateCSV, featureSlug, tags, withDescription)
+				return listIssuesFromSyncRepo(root, repoSelector(), allRepos, stateCSV, featureSlug, tags, withDescription)
 			}
 			c, err := openClient()
 			if err != nil {
@@ -196,7 +201,6 @@ func issueListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&stateCSV, "state", "", "comma-separated states to filter (e.g. todo,in_review)")
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "limit to a feature")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "require this tag (repeatable; AND semantics)")
-	cmd.Flags().StringVar(&repoPrefix, "repo", "", "limit to a specific repo prefix; required when run inside a sync repo (or pass --all-repos)")
 	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "search across all tracked repos")
 	cmd.Flags().BoolVar(&withDescription, "with-description", false, "include each issue's full description in JSON output (off by default to keep responses small)")
 	cmd.Flags().BoolVar(&includeArchived, "include-archived", false, "include archived issues in the list (BACI-68); overrides the display.show_archived setting for this call")

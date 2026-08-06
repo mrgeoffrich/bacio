@@ -8,6 +8,7 @@
 // reshapes are unit testable — see ./issue.ts for the pattern + the
 // Phase 2b note.
 
+import { normalizeRepoKind } from './repo';
 import type {
   Board,
   SyncRegistry,
@@ -56,7 +57,11 @@ export interface MemberProjectApi {
   prefix: string;
   name: string;
   uuid?: string;
-  status: 'linked' | 'phantom' | 'absent';
+  // 'workspace' joined the enum with the pivot: a workspace row in a sync
+  // repo is pathless like a phantom, but it is fully present and being
+  // mirrored rather than waiting to be linked, so the two must not be
+  // conflated. See internal/sync/membership.go's MembershipStatus.
+  status: 'linked' | 'phantom' | 'absent' | 'workspace';
 }
 
 export interface UnsyncedProjectApi {
@@ -107,25 +112,33 @@ export interface RepoLinkResultApi {
   would_link?: boolean;
 }
 
-// ApiRepo is the wire shape POST /repos returns — the bare repo row the
-// web bundle's addRepository folds into a Board via boardWithSync.
+// ApiRepo is the wire shape POST /repos, POST /workspaces and GET /repos
+// return (model.Repo) — the bare repo row the web bundle's addRepository /
+// addWorkspace / listBoards fold into a Board via boardWithSync. `kind`
+// has no omitempty server-side, so it is always on the wire; it is typed
+// as a plain string here and narrowed by normalizeRepoKind.
 export interface ApiRepo {
   prefix: string;
   name: string;
+  kind: string;
   path: string;
 }
 
 // boardWithSync folds a SyncStatusApi (possibly undefined) into a
-// Board. Centralised so listBoards and addRepository stay in lockstep.
+// Board. Centralised so listBoards, addRepository and addWorkspace stay in
+// lockstep. `kind` is the raw wire string; the narrowing to the RepoKind
+// union happens here so no caller has to remember it.
 export function boardWithSync(
   prefix: string,
   name: string,
+  kind: string,
   issueCount: number,
   sync: SyncStatusApi | undefined,
 ): Board {
   return {
     prefix,
     name,
+    kind: normalizeRepoKind(kind),
     issueCount,
     syncEnabled: sync?.configured ?? false,
     syncBackgroundEnabled: sync?.background_enabled ?? false,

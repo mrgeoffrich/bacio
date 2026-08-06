@@ -69,6 +69,28 @@ Useful flags:
 | `--no-push` | Commit but don't push. |
 | `--dry-run` | Roll back DB writes, skip commit and push. |
 
+## Workspaces, folders and lanes
+
+**The export is whole-database, not per-project.** Every `bacio sync` run walks every project in `~/.bacio/db.sqlite` and writes them all into the sync repo. Two consequences worth knowing:
+
+**A [workspace](/concepts/workspaces) is mirrored for free.** The moment any git repo on the machine drives a sync run, that run carries every workspace's issues, documents, folders and lanes along with it. There is nothing to set up.
+
+A workspace also **has no sync settings of its own** and cannot drive a run — it has no working tree, so nowhere to keep a `.bacio/config.yaml`. `bacio sync init` / `bacio sync clone` operate on the repo you're standing in and won't target a workspace. That's why a workspace never appears in the "unsynced projects" list in the Sync settings pane: the pane instead names the sync repo currently mirroring it. Set up sync on any one git repo and your workspaces come along.
+
+**Folders and lanes ride along too**, as new sibling records under each project:
+
+```
+repos/<PREFIX>/workspace.yaml            # present ⇔ this prefix is a workspace
+repos/<PREFIX>/folders/<uuid>/folder.yaml
+repos/<PREFIX>/kanban/<uuid>/column.yaml
+```
+
+Membership lives on the container: a `folder.yaml` lists the pages inside it and a `column.yaml` lists the cards in the lane, both **in order** — so the tree shape, the order of pages within a folder, and the order of cards within a lane all survive a round trip. The `repo.yaml`, `issue.yaml` and `doc.yaml` files are byte-for-byte what they always were.
+
+::: tip An older bacio keeps syncing fine
+That last sentence is the whole compatibility story. A machine still running an older bacio can pull, import, export and push a sync repo written by a newer one without error — it simply doesn't see workspaces, folders or lanes. A workspace imports as an inert prefix with no local checkout, and the `folders/` and `kanban/` directories are invisible to it and left untouched. Upgrade that machine and everything appears.
+:::
+
 ## What happens on a collision
 
 If two machines independently create `MINI-7`:
@@ -115,5 +137,6 @@ That's the full sync-repo-aware list surface; everything else still refuses with
 ## See also
 
 - **[`bacio sync`](/reference/cli/sync)** — the CLI reference.
+- **[Workspaces](/concepts/workspaces)** — mirrored by every sync run, with nothing to configure.
 - **[Browse in your editor](/guides/browse-in-your-editor)** — once you have a sync repo, you can ripgrep your board.
 - **[Local-first and the audit log](/concepts/local-first-and-audit)** — what survives sync and what doesn't.

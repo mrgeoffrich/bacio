@@ -7,7 +7,7 @@ description: How bacio thinks — repos, prefixes, issues, features, comments, l
 
 ## The hierarchy in one paragraph
 
-**repo → (optional) feature → issue.** A repo binds the current git working tree to a 4-letter prefix (`MINI`, `AUTH`). Inside that repo, you create **issues** (`MINI-42`) and optionally group them into **features** (slug-addressed, e.g. `auth-rewrite`). Issues can exist without a feature. Everything attaches to an issue: **comments**, **tags**, typed **links** to other issues, attached **PR URLs**. **Documents** are per-repo markdown blobs that link to one or many issues / features.
+**repo → (optional) feature → issue.** A repo binds the current git working tree to a 4-letter prefix (`MINI`, `AUTH`). Inside that repo, you create **issues** (`MINI-42`) and optionally group them into **features** (slug-addressed, e.g. `auth-rewrite`). Issues can exist without a feature. Everything attaches to an issue: **comments**, **tags**, typed **links** to other issues, attached **PR URLs**, and optionally a **Kanban lane**. **Documents** are per-repo markdown blobs that link to one or many issues / features and can be filed into a **folder** tree.
 
 ## At a glance
 
@@ -43,6 +43,7 @@ Direction notes:
 - `issue.feature_slug` — many issues per feature, one feature per issue (optional).
 - Documents link to one or many issues / features through a join table with an optional `--why` reason.
 - Relations are typed edges between issues: `blocks`, `relates_to`, `duplicate_of` (canonical underscored form; the CLI also accepts the dashed spelling on input).
+- Two per-repo containers hang off the repo alongside the above: **Kanban lanes** (an issue optionally sits in one) and **doc folders** (a document optionally sits in one, and folders nest).
 
 ## Entities
 
@@ -52,6 +53,17 @@ The unit of project scope. Auto-detected from the current working directory by w
 
 - Has a **prefix** (4 alphanumeric chars), unique across the global DB.
 - Auto-registers on first `bacio` command if not bound — `bacio init` is optional.
+- Has a **kind**: `git` (the default) or `workspace`.
+
+### Workspace
+
+A repo row with `kind = workspace` and **no path on disk**. It holds issues, features, documents, folders and a Kanban board exactly as a git repo does, and shares the same prefix namespace — `HOME-42` is as unambiguous as `MINI-42`.
+
+Because it has no working tree it can never be resolved from `cwd`: pass the global `--repo <PREFIX>` selector (or set `BACIO_REPO`). Anything that needs a checkout — agent dispatch, sync setup, `doc export --to-path` — is refused. See [Workspaces](/concepts/workspaces).
+
+::: tip Pathless is not always a workspace
+A **phantom** is a `git` repo imported from a sync repo that has no checkout *on this machine yet*; `bacio repo link <PREFIX> <PATH>` binds it to one. A workspace is pathless on purpose and permanently. The `kind` field is what tells them apart.
+:::
 
 ### Feature
 
@@ -65,6 +77,7 @@ An optional grouping of issues — think *project* or *epic*. Addressed by slug 
 The unit of work. Addressed by canonical key `PREFIX-N` (e.g. `MINI-42`). On the CLI flag path, humans can also use the bare number; JSON payloads must use the canonical form.
 
 - **State**: `todo | in_review | done | cancelled`, plus the Pipeline-page columns `in_pipeline | to_be_shipped`. The state parser tolerates dashes or spaces (`in-review`, `in review`). (The legacy `in_progress` / `needs_action` states were retired in BACI-300 — work flows through the Pipeline, and "waiting on a human" is an open question on the ticket, not a state.)
+- **Kanban lane**: optional, and **orthogonal to state**. An issue with no lane is simply not on the Kanban. See [Kanban and the Agentic Pipeline](/concepts/kanban-and-pipeline).
 - **Fields**: title, description, state, optional `feature_slug`, optional `assignee`, tags, timestamps.
 - **Attached entities**: comments, typed relations, PR URLs, linked documents.
 
@@ -91,6 +104,19 @@ A per-repo named text blob (markdown, etc.) with a typed category (`architecture
 - **`bacio doc add` / `upsert` / `edit` / `rename` / `rm`** — CRUD.
 - **`bacio doc link [filename] [ISSUE-KEY|feature-slug]`** — wire up the link. Auto-detects issue keys by the `PREFIX-N` shape; treats anything else as a feature slug.
 - Linked-doc bodies are inlined into `bacio issue brief` (unless `--no-doc-content`).
+- Optionally filed into a **doc folder**; unfiled documents sit at the tree root.
+
+### Doc folder
+
+A container in a per-repo document tree: a name, an optional `parent` (none = root), and a position among its siblings. Nesting is capped at 16 levels and cycles are refused.
+
+Folders are **purely organisational**. `UNIQUE(repo, filename)` still holds, so two pages in different folders cannot share a name, and a document's filename — its URL, its CLI argument, its position in a sync repo — is untouched by a move. Deleting a folder deletes its subfolders and **re-roots** every page inside. See [Document folders](/concepts/document-folders).
+
+### Kanban lane
+
+A per-repo board column with a name (unique per repo) and a left-to-right position. `Backlog` / `Doing` / `Waiting` / `Done` are seeded on registration; rename, reorder, add and delete them freely.
+
+An issue is on the Kanban **if and only if** it references a lane, and lane membership is orthogonal to `state` — neither one moves the other. Workspaces put every new issue on the leftmost lane; git repos leave it off the board until you opt it in. Deleting a lane takes its cards off the board and never deletes an issue.
 
 ### History (audit log)
 
@@ -116,12 +142,16 @@ Every mutation runs through validators in the store layer, so malformed input fa
 
 - **No control characters anywhere.** Single-line fields reject all C0 controls and DEL. Multi-line fields allow `\t \n \r`.
 - **No silent trimming on identifiers.** Whitespace in a `filename`, `slug`, or URL is a hard error.
-- **Length caps**: title 200, name/assignee 80, slug 60, filename 200, tag 80, PR URL 2 KiB, body fields 1 MiB.
+- **Length caps**: title 200, name/assignee 80, slug 60, filename 200, folder name 200, lane name 80, tag 80, PR URL 2 KiB, body fields 1 MiB.
+- **Folder and lane names reject `/` and `\`**, plus `.` and `..` — the same rules as a filename, so a name is always safe as one path segment.
 
 See [JSON payloads](/reference/json-payloads) for how this surfaces over the agent contract.
 
 ## See also
 
+- **[Workspaces](/concepts/workspaces)** — the non-git project kind.
+- **[Kanban and the Agentic Pipeline](/concepts/kanban-and-pipeline)** — lanes vs states.
+- **[Document folders](/concepts/document-folders)** — the page tree.
 - **[Local-first and audit log](/concepts/local-first-and-audit)** — where this data lives.
 - **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — how the contract uses this model.
 - **[CLI reference](/reference/cli/)** — every command that creates, reads, or mutates these entities.

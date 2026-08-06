@@ -362,6 +362,15 @@ func indexFoldersByUUID(root string) (map[string]string, error) {
 		indexKindFolders(prefixPath, "features", "feature.yaml", "feature", "repos/"+prefix.Name(), out)
 		indexKindFolders(prefixPath, "issues", "issue.yaml", "issue", "repos/"+prefix.Name(), out)
 		indexKindFolders(prefixPath, "docs", "doc.yaml", "document", "repos/"+prefix.Name(), out)
+		// Container records. Their folder segment IS the uuid, so a
+		// rename is structurally impossible and these two lines can
+		// never produce an opMove today. They're indexed anyway so the
+		// diff sees the same universe of records the export writes —
+		// if the layout ever gains a label segment, rename detection
+		// (and therefore `git mv` history preservation) is already
+		// wired rather than silently absent.
+		indexKindFolders(prefixPath, DocFoldersSubdir, DocFolderManifestName, "doc_folder", "repos/"+prefix.Name(), out)
+		indexKindFolders(prefixPath, KanbanColumnsSubdir, KanbanColumnManifestName, "kanban_column", "repos/"+prefix.Name(), out)
 
 		// Comments are nested under issues/<label>/comments/. They
 		// move when the issue moves; we don't track them here.
@@ -440,6 +449,30 @@ func recordFolderOf(relPath string) string {
 		return strings.Join(parts[:4], "/")
 	case "docs":
 		// Docs have no comments subdir; group by the record folder.
+		return strings.Join(parts[:4], "/")
+	case DocFoldersSubdir, KanbanColumnsSubdir:
+		// Container records (folders/<uuid>/, kanban/<uuid>/). Flat like
+		// docs — one manifest per record folder, no nested subdirs.
+		//
+		// ⚠️ THIS IS THE ONE PLACE THIS BINARY DELIBERATELY DIVERGES FROM
+		// AN OLDER ONE, AND THE DIVERGENCE IS THE POINT. An older bacio's
+		// recordFolderOf has no such case, so it returns "" here and
+		// therefore NEVER deletes a container record it doesn't
+		// understand — which is exactly the backward-compatibility
+		// guarantee (pinned by TestLegacyRecordFolderOfIgnoresPivotPaths,
+		// which runs the frozen pre-pivot algorithm against these paths).
+		//
+		// A NEW binary must handle them, though: without this case a
+		// folder deleted from the DB would leave its manifest on disk
+		// forever, and the very next import would scan that manifest and
+		// resurrect the folder. Deletion has to be able to reach the
+		// file that records the container's existence.
+		//
+		// Note the asymmetry with workspace.yaml, which is 3 segments and
+		// falls out at the length guard above: it is never deleted by
+		// either binary, exactly like its sibling repo.yaml. A repo's
+		// kind doesn't change, and bacio has never pruned a whole
+		// repos/<PREFIX>/ folder from the sync repo.
 		return strings.Join(parts[:4], "/")
 	}
 	return ""

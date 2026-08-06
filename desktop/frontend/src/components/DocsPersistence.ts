@@ -15,6 +15,7 @@ import { readLocalStorage, writeLocalStorage, type LocalStorageCodec } from '../
 
 export const SORT_KEY_KEY = 'bacio-docs-sort';
 export const SIDEBAR_COLLAPSED_KEY = 'bacio-docs-sidebar-collapsed';
+export const EXPANDED_FOLDERS_KEY = 'bacio-docs-expanded-folders';
 
 // Default sort — Updated (most recent first) matches what the
 // BACI-204 plan called the recommended browsing surface.
@@ -59,6 +60,27 @@ export function readSort(repo: string): SortKey {
 
 export function persistSort(repo: string, sort: SortKey): void {
   persistPerRepo(SORT_KEY_KEY, repo, sort, v => v === DEFAULT_SORT);
+}
+
+// Expanded folders — per-repo, keyed by folder uuid (never the numeric id;
+// uuid is the only folder identity that survives a sync round trip, so a
+// tree expanded on one machine stays expanded on the other). Stored as a
+// plain array so the on-disk JSON stays readable; read back through a Set
+// because that's what the rail asks it ("is this node open?").
+//
+// Stale uuids (a folder deleted elsewhere) are harmless: they simply never
+// match a node. They're pruned on the next persist, since the rail only
+// ever writes back uuids it can still see.
+export function readExpandedFolders(repo: string): string[] {
+  if (!repo) return [];
+  const map = readPerRepoMap<unknown>(EXPANDED_FOLDERS_KEY);
+  const v = map[repo];
+  if (!Array.isArray(v)) return [];
+  return v.filter((u): u is string => typeof u === 'string' && u !== '');
+}
+
+export function persistExpandedFolders(repo: string, uuids: string[]): void {
+  persistPerRepo(EXPANDED_FOLDERS_KEY, repo, uuids, v => v.length === 0);
 }
 
 // Sidebar collapse — global (not per-repo) preference, mirrors the

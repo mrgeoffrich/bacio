@@ -37,6 +37,15 @@ func newRouter(d deps) http.Handler {
 
 	mux.HandleFunc("GET /repos", d.handleReposList)
 	mux.HandleFunc("POST /repos", d.handleReposCreate)
+	// Workspaces (the pivot): a repos row with kind='workspace', no path
+	// and no remote. Its own top-level route rather than a flavour of
+	// POST /repos because registering a git repo *requires* a path and a
+	// workspace *forbids* one — two different payload contracts. POST
+	// /repos still accepts {"kind":"workspace"} and funnels into the
+	// identical handler body, so the two surfaces cannot drift.
+	// GET /workspaces is deliberately absent: a workspace is a repo, so
+	// GET /repos already lists it (with kind on every row).
+	mux.HandleFunc("POST /workspaces", d.handleWorkspaceCreate)
 	// BACI-369: cross-repo activity summary for the topbar picker's
 	// ordering. The "activity" literal is more specific than "{prefix}"
 	// so ServeMux disambiguates without a conflicting pattern, and a repo
@@ -84,6 +93,10 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/state", d.handleIssueState)
 	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/assignee", d.handleIssueAssign)
 	mux.HandleFunc("DELETE /repos/{prefix}/issues/{key}/assignee", d.handleIssueUnassign)
+	// Kanban placement for one card. Orthogonal to /state: `state` is the
+	// agent/pipeline lifecycle, `kanban` is the human lane. An empty
+	// column_uuid takes the card off the board. See handlers_kanban.go.
+	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/kanban", d.handleIssueKanbanSet)
 
 	// Pipeline page: card ordering, process assignment, and the engine
 	// controls (manual Start / Stop, auto drive-mode, ship hand-off) plus
@@ -142,6 +155,35 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /repos/{prefix}/documents/{filename}/rename", d.handleDocumentRename)
 	mux.HandleFunc("POST /repos/{prefix}/documents/{filename}/links", d.handleDocumentLink)
 	mux.HandleFunc("DELETE /repos/{prefix}/documents/{filename}/links", d.handleDocumentUnlink)
+	// The pivot's page tree. `doc-folders` is hyphenated (not
+	// `doc_folders`) to match every other multi-word path segment on this
+	// surface — /sync-preferences, /default-feature, /hidden-states — and
+	// deliberately sits beside /documents rather than under it: a folder
+	// is not addressed by a filename, and documents.filename stays flat
+	// and globally unique per repo (locked decision D3).
+	//
+	// PATCH is a presence map (name ⇒ rename, parent_uuid ⇒ move) and
+	// there is no single-folder GET. Both are load-bearing — see
+	// handlers_docfolders.go.
+	mux.HandleFunc("GET /repos/{prefix}/doc-folders", d.handleDocFoldersList)
+	mux.HandleFunc("POST /repos/{prefix}/doc-folders", d.handleDocFolderCreate)
+	mux.HandleFunc("PATCH /repos/{prefix}/doc-folders/{uuid}", d.handleDocFolderPatch)
+	mux.HandleFunc("DELETE /repos/{prefix}/doc-folders/{uuid}", d.handleDocFolderDelete)
+	// Folder membership for one page. A sibling of /rename and /links so
+	// the whole per-document verb set lives at one depth.
+	mux.HandleFunc("PUT /repos/{prefix}/documents/{filename}/folder", d.handleDocumentFolderSet)
+
+	// The pivot's Kanban lanes. Nested under a `kanban` namespace so the
+	// board can grow sibling resources later without competing with
+	// {prefix}-level literals, and so `columns` can never be confused
+	// with the pre-existing state-keyed BoardColumn DTO the settings pane
+	// still consumes. PATCH is a presence map (name ⇒ rename, position ⇒
+	// reorder) and answers with the moved lane only — see
+	// handlers_kanban.go.
+	mux.HandleFunc("GET /repos/{prefix}/kanban/columns", d.handleKanbanColumnsList)
+	mux.HandleFunc("POST /repos/{prefix}/kanban/columns", d.handleKanbanColumnCreate)
+	mux.HandleFunc("PATCH /repos/{prefix}/kanban/columns/{uuid}", d.handleKanbanColumnPatch)
+	mux.HandleFunc("DELETE /repos/{prefix}/kanban/columns/{uuid}", d.handleKanbanColumnDelete)
 
 	mux.HandleFunc("GET /history", d.handleHistoryAll)
 	mux.HandleFunc("GET /repos/{prefix}/history", d.handleHistoryRepo)

@@ -75,6 +75,52 @@ Rule of thumb: **types come from `contract.ts`, runtime functions come from the
 never reference a Wails enum *member* at runtime — both break `build:web`. See
 the rules doc for the exact casts.
 
+`Board.kind` is the live worked example: it is a **string-literal union**
+(`type RepoKind = 'git' | 'workspace'`) declared in `contract.ts`, deliberately
+**not** a Wails enum. `api.http.ts` ships Wails enum names as *types only*, so a
+component that wrote `RepoKind.Workspace` would pass `tsc` against the Wails
+build and blow up in the browser. Compare against the literal
+(`board.kind === 'workspace'`) or cast one (`'workspace' as RepoKind`) — never a
+member. The Wails binding types `kind` as a bare `string`, so `api/board.ts`'s
+`toBoard` narrows it through `normalizeRepoKind` (which also maps a legacy `''`
+onto `'git'`) before the DTO leaves the seam.
+
+### 2a. Four reshaping decisions the two transports had to agree on
+
+The Kanban and page-tree surfaces are where the two transports diverged most, and
+the contract picked a winner in each case. Follow these when you extend either.
+
+1. **`uuid`, never `id`.** The HTTP wire nests the full `model.KanbanColumn` /
+   `model.DocFolder` — numeric `id`, `repo_id`, timestamps, snake_case — while
+   Wails ships a lean camelCase DTO. The contract exposes **`uuid` only**; the
+   reshapers in `api/wire/kanban.ts` / `api/wire/doc.ts` drop the numeric ids.
+   A uuid is the only identity that survives a sync round trip, and every
+   mutator on both transports is uuid-addressed.
+2. **`parentUuid`, not `parent_id`.** HTTP's `DocFolder` carries a numeric
+   `parent_id` (absent = root); the contract's `DocFolder.parentUuid` is a
+   string where `''` means the tree root — a *value*, not an absence, because
+   the root is not itself a folder and `''` is the only way to address it. The
+   HTTP side builds an id→uuid map from the folder list it just fetched
+   (`folderUuidIndex` / `resolveFolderUuid` in `api/wire/doc.ts`) — do that in
+   the wire module, never in a view.
+3. **`DocSummary.folderUuid`, not `folderId`.** Same reasoning, same index. The
+   HTTP `Document` still carries `folder_id` on the wire; `reshapeDocSummary`
+   resolves it. The field is required rather than optional, because `''` (root)
+   is meaningful.
+4. **Reorder / delete / move return the refreshed board.** The Wails
+   `ReorderKanbanColumn` / `DeleteKanbanColumn` / `SetIssueKanbanColumn` answer
+   with the whole `KanbanColumn[]`; the HTTP routes answer with the single moved
+   lane (or 204). Siblings **re-densify** underneath either write — positions are
+   dense 0-based indices server-side — so the single-row answer is never enough
+   to repaint. The seam signature is therefore "returns the refreshed board" on
+   both sides, and `api/kanban.http.ts` re-reads `listKanbanColumns` after the
+   write to honour it.
+
+One more shared convention: a `Position *int` on the Go side binds as
+`position: number | null` in the seam, and **`null` maps to an absent `position`
+on the HTTP wire** — absent means "append", `0` means "top of the lane", and the
+two must not collapse.
+
 ## 3. The `state/` layer — global state out of `App.tsx`
 
 Global app state lives in a small stack of Context providers, each owning one
@@ -112,6 +158,37 @@ local hooks:
   `ProcessMenu`, the `CardHead` / `CardTitleBlock` / `CardLabels` leaves, and the
   drag/drop + preferences hooks (`useDragDropLogic`, `useDragState`,
   `usePipelinePreferences`, `useStageCardState`).
+- `components/kanban/*` — the Kanban board at `/<prefix>/issues`, the human-lane
+  axis (see ARCHITECTURE.md's "two board axes"). `KanbanBoard` holds two
+  resources and joins them: the lanes with their ordered card references from
+  `api.listKanbanColumns`, and the card detail from the `CardsProvider` list the
+  whole app already polls — **membership rides on the container, so `BoardCard`
+  carries no lane field.** `KanbanLane` owns one lane's header and drop target;
+  `KanbanCard` is a deliberately slim human-work card (emoji, key, title, tags,
+  assignees, blocked lock) with none of the Pipeline's dispatch affordances;
+  lane CRUD and the "put a card on the board" picker hang off the lane header as
+  their own menu / dialog leaves. **The fiddly pure bits live in sibling `.ts`
+  modules, not in the components** — the optimistic drag reshuffle and the
+  container-side join in `kanbanPlacement.ts`, the off-board derivation in
+  `kanbanOffBoard.ts`, the lane ordering arithmetic in `kanbanLanes.ts` — so
+  ordering maths and irreversible-action wording are testable without a DOM. The
+  `*Persistence.ts` modules hold the per-view UI state (scroll, collapse,
+  compact). The DnD is the same hand-rolled HTML5 gesture the pre-pivot board
+  used — **no DnD library.**
+- `components/docs/*` — the Confluence-style page tree. `DocsTreeRail` is a
+  single left rail replacing both pre-pivot left panes (facet rail + list), which
+  is what buys the TipTap editor its width; it has two body modes and the parent
+  usually picks — typing in search or activating a facet auto-flattens to ranked
+  results and flips back when cleared. `DocsTreeNode` is the recursive row,
+  `DocsFolderPage` the folder-selected surface (a real page with a live children
+  index, so clicking a folder is never a dead end), `DocsNav` the breadcrumb +
+  peer-jump. State splits three ways: `useDocsTree` (expansion, persisted per
+  repo by folder **uuid**, plus auto-expanding down to the selection),
+  `useDocsTreeDrag` (the same hand-rolled HTML5 DnD), and `useDocsActions` (every
+  create/rename/delete/move round trip plus its dialogs). Tree assembly itself is
+  pure and lives in `lib/docsFilter.ts`. `DocsViewer` and the TipTap
+  `NotionEditor` are untouched by the decomposition — including the
+  **ref-not-state** `initializedRef` guard (BACI-340).
 - `components/features/*`, `components/settings/*` — the same treatment for the
   Features and Settings screens.
 

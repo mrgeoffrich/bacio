@@ -179,6 +179,61 @@ type ParsedDocument struct {
 	ArchivedAt *time.Time `yaml:"archived_at,omitempty" json:"archived_at,omitempty"`
 }
 
+// ParsedWorkspace is the on-disk shape of repos/<prefix>/workspace.yaml
+// — the sentinel whose mere PRESENCE marks a synced prefix as a
+// workspace rather than a git repo.
+//
+// `kind` lives here rather than in repo.yaml on purpose: repo.yaml is
+// parsed by every bacio ever shipped with KnownFields(true), so a new
+// key there would hard-fail an older binary's whole sync run and be
+// stripped on its next export. See the A0 rule in paths.go.
+//
+// The file carries the *repo's* uuid (not a uuid of its own) so a
+// reader can cross-check the sentinel against the sibling repo.yaml,
+// and the repo's timestamps so the file is byte-stable across exports.
+type ParsedWorkspace struct {
+	UUID      string    `yaml:"uuid" json:"uuid"`
+	Kind      string    `yaml:"kind" json:"kind"`
+	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
+	UpdatedAt time.Time `yaml:"updated_at" json:"updated_at"`
+}
+
+// ParsedDocFolder is the on-disk shape of
+// repos/<prefix>/folders/<uuid>/folder.yaml.
+//
+// Membership lives HERE, on the container, never on the member:
+// `documents` is the ordered sequence of document uuids in this folder,
+// and the order within the sequence IS the tree order. That is the
+// load-bearing choice of the whole design — it keeps doc.yaml
+// byte-identical to what an older binary writes, so nothing breaks in
+// either direction.
+//
+// ParentUUID is the empty string for a root folder. It is always
+// emitted (rather than omitted) so the schema is uniform.
+type ParsedDocFolder struct {
+	UUID       string    `yaml:"uuid" json:"uuid"`
+	Name       string    `yaml:"name" json:"name"`
+	ParentUUID string    `yaml:"parent_uuid" json:"parent_uuid"`
+	Position   int       `yaml:"position" json:"position"`
+	Documents  []string  `yaml:"documents" json:"documents"`
+	CreatedAt  time.Time `yaml:"created_at" json:"created_at"`
+	UpdatedAt  time.Time `yaml:"updated_at" json:"updated_at"`
+}
+
+// ParsedKanbanColumn is the on-disk shape of
+// repos/<prefix>/kanban/<uuid>/column.yaml. Same container-side
+// membership rule as ParsedDocFolder: `issues` is the ordered sequence
+// of issue uuids in this lane, and the order IS the top-to-bottom card
+// order. issue.yaml stays byte-identical to today.
+type ParsedKanbanColumn struct {
+	UUID      string    `yaml:"uuid" json:"uuid"`
+	Name      string    `yaml:"name" json:"name"`
+	Position  int       `yaml:"position" json:"position"`
+	Issues    []string  `yaml:"issues" json:"issues"`
+	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
+	UpdatedAt time.Time `yaml:"updated_at" json:"updated_at"`
+}
+
 // ParsedRedirect is one entry in redirects.yaml. The file is a
 // top-level YAML sequence of these.
 type ParsedRedirect struct {
@@ -266,6 +321,35 @@ func ParseDocumentYAML(b []byte) (*ParsedDocument, error) {
 	return &d, nil
 }
 
+// ParseWorkspaceYAML decodes a workspace.yaml sentinel.
+func ParseWorkspaceYAML(b []byte) (*ParsedWorkspace, error) {
+	var w ParsedWorkspace
+	if err := strictDecode(b, &w); err != nil {
+		return nil, fmt.Errorf("parse workspace.yaml: %w", err)
+	}
+	return &w, nil
+}
+
+// ParseDocFolderYAML decodes a folder.yaml record.
+func ParseDocFolderYAML(b []byte) (*ParsedDocFolder, error) {
+	var f ParsedDocFolder
+	if err := strictDecode(b, &f); err != nil {
+		return nil, fmt.Errorf("parse folder.yaml: %w", err)
+	}
+	f.Name = NormalizeNFC(f.Name)
+	return &f, nil
+}
+
+// ParseKanbanColumnYAML decodes a column.yaml record.
+func ParseKanbanColumnYAML(b []byte) (*ParsedKanbanColumn, error) {
+	var c ParsedKanbanColumn
+	if err := strictDecode(b, &c); err != nil {
+		return nil, fmt.Errorf("parse column.yaml: %w", err)
+	}
+	c.Name = NormalizeNFC(c.Name)
+	return &c, nil
+}
+
 // ParseRedirectsYAML decodes redirects.yaml bytes. The file is a
 // top-level YAML sequence; an empty/missing file is the caller's
 // responsibility to skip — this function expects valid bytes.
@@ -333,6 +417,7 @@ var stringFields = map[string]struct{}{
 	"author":           {},
 	"customer_impact":  {},
 	"name":             {},
+	"parent_uuid":      {},
 	"prefix":           {},
 	"reason":           {},
 	"remote_url":       {},

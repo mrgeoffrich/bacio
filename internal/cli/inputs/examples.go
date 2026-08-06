@@ -365,4 +365,70 @@ var (
 		Mode:   "attach",
 		Remote: "git@example.com:bacio/team-sync.git",
 	}
+
+	// ----- Workspaces -----
+	// Prefix omitted on purpose: the common call lets bacio allocate one
+	// from the name, exactly as a git registration does.
+	ExampleWorkspaceAdd = WorkspaceAddInput{
+		Name: "Home Renovation",
+	}
+	// The confirm value must equal the prefix; run with --dry-run first
+	// to read the cascade counts.
+	ExampleWorkspaceRm = WorkspaceRmInput{
+		Prefix:  "HOME",
+		Confirm: "HOME",
+	}
+
+	// ----- Doc folders -----
+	// Nested create: "API" already exists at the root, so the new "Auth"
+	// folder lands at Design/API/Auth. Omit `parent` to create at the root.
+	ExampleDocFolderAdd = DocFolderAddInput{
+		Name:   "Auth",
+		Parent: "Design/API",
+	}
+	ExampleDocFolderRename = DocFolderRenameInput{
+		Path: "Design/API/Auth",
+		Name: "Authentication",
+	}
+	// Re-parent one level up. `"to": ""` would re-root it instead — the
+	// field is required, and empty is a real destination, not a missing one.
+	ExampleDocFolderMv = DocFolderMvInput{
+		Path: "Design/API/Authentication",
+		To:   "Design",
+	}
+	ExampleDocFolderRm = DocFolderRmInput{
+		Path: "Design/API",
+	}
+	// File a page into a folder. `"folder": ""` moves it back to the tree
+	// root; omitting `position` appends after the folder's current members.
+	ExampleDocMv = DocMvInput{
+		Filename: "auth-design.md",
+		Folder:   "Design/Authentication",
+	}
+
+	// ----- Kanban -----
+	ExampleKanbanColumnAdd = KanbanColumnAddInput{
+		Name: "Blocked",
+	}
+	ExampleKanbanColumnRename = KanbanColumnRenameInput{
+		Column: "Waiting",
+		Name:   "Blocked",
+	}
+	// 0-based and dense: position 1 is the second lane from the left.
+	ExampleKanbanColumnMv = KanbanColumnMvInput{
+		Column:   "Blocked",
+		Position: 1,
+	}
+	ExampleKanbanColumnRm = KanbanColumnRmInput{
+		Column: "Blocked",
+	}
+	// Put a card at the top of Doing. `"column": ""` takes it off the
+	// board; omitting `position` appends to the bottom of the lane.
+	ExampleKanbanMove = KanbanMoveInput{
+		IssueKey: "MINI-42",
+		Column:   "Doing",
+		Position: intPtr(0),
+	}
 )
+
+func intPtr(n int) *int { return &n }

@@ -2,16 +2,131 @@ package model
 
 import "time"
 
+// RepoKind discriminates the two container shapes a `repos` row can
+// take. Before the workspaces pivot there was only one, and the column
+// did not exist — hence RepoKindGit is both the DB default and the
+// meaning of the empty string.
+type RepoKind string
+
+const (
+	// RepoKindGit is a git-backed repo: bacio tracks an actual working
+	// tree (or a phantom placeholder for one that lives on another
+	// machine). The default; '' reads as this.
+	RepoKindGit RepoKind = "git"
+	// RepoKindWorkspace is a manual workspace: a bacio-only container
+	// with a 4-char prefix, issues, documents and folders, but no
+	// checkout, no remote and no working tree. Its Path is always ''
+	// (store-enforced).
+	RepoKindWorkspace RepoKind = "workspace"
+)
+
 type Repo struct {
-	ID              int64     `json:"id"`
-	UUID            string    `json:"uuid"`
-	Prefix          string    `json:"prefix"`
-	Name            string    `json:"name"`
+	ID     int64  `json:"id"`
+	UUID   string `json:"uuid"`
+	Prefix string `json:"prefix"`
+	Name   string `json:"name"`
+	// Kind is "git" (a git-backed repo, the default) or "workspace" (a
+	// manual, bacio-only container). See the truth table on the
+	// IsWorkspace / IsPhantom / HasWorkingTree predicates below — the
+	// pair (Kind, Path) is what disentangles the historical overload of
+	// `Path == ""`. No omitempty: the discriminator must be visible in
+	// JSON (including on rows that read the '' legacy value) so wire
+	// consumers never have to guess.
+	Kind            RepoKind  `json:"kind"`
 	Path            string    `json:"path"`
 	RemoteURL       string    `json:"remote_url,omitempty"`
 	NextIssueNumber int64     `json:"next_issue_number"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// The three repo predicates below are the single disambiguation of what
+// used to be an overloaded `Path == ""` check scattered across
+// internal/{sync,client,api,cli}. Read the table before touching any of
+// them:
+//
+//	| Kind        | Path    | meaning                                          |
+//	|-------------|---------|--------------------------------------------------|
+//	| "git"       | ""      | PHANTOM — a synced prefix with no checkout here   |
+//	| "git"       | "/abs/…"| a linked git repo                                 |
+//	| "workspace" | ""      | a manual workspace (invariant, store-enforced)    |
+//	| "workspace" | "/abs/…"| IMPOSSIBLE — rejected at the store boundary       |
+//
+// Before the pivot, `Path == ""` meant "phantom" and nothing else, so
+// every site that skipped, refused or flagged a pathless repo was
+// implicitly saying "phantom". A workspace is also pathless but is a
+// first-class, locally-real container — treating it as a phantom would
+// silently skip it in background sync, refuse it in sync setup, and
+// list it as absent. Use these predicates, never a bare Path check.
+
+// IsWorkspace reports whether r is a manual (non-git) workspace.
+func (r *Repo) IsWorkspace() bool { return r.Kind == RepoKindWorkspace }
+
+// IsPhantom reports whether r is a phantom git repo — a prefix that
+// exists in the sync repo but has no local checkout on this machine.
+//
+// Written as !IsWorkspace() rather than the equivalent-looking
+// `Kind == RepoKindGit` on purpose: a Repo value whose Kind was never
+// populated carries the empty string (a struct built in Go, a row
+// scanned by a read path that has not yet added `kind` to its column
+// list). '' must read as git — it is what the DB column's DEFAULT 'git'
+// means — and the negative form gets that for free, where the positive
+// form would silently report every legacy phantom as non-phantom.
+func (r *Repo) IsPhantom() bool { return !r.IsWorkspace() && r.Path == "" }
+
+// HasWorkingTree reports whether r has a local checkout on this
+// machine — the precondition for anything that touches the filesystem
+// (git detection, `.bacio/config.yaml`, worktrees, doc --from-path /
+// --to-path). False for both phantoms and workspaces.
+func (r *Repo) HasWorkingTree() bool { return r.Path != "" }
+
+// DocFolder is one node of the per-repo Confluence-style page tree.
+// ParentID nil = a root folder. Folders are purely organisational:
+// Document.Filename stays flat and globally unique per repo, so the
+// tree changes no URL, CLI verb, HTTP route or on-disk sync path.
+//
+// Display paths ("Design/API/Auth") are DERIVED by walking ParentID,
+// never stored — a folder rename must not rewrite N document rows and
+// N doc.yaml files, and a stored path would tempt loosening the
+// filename validator to admit '/', which the flat sync record layout
+// cannot survive.
+type DocFolder struct {
+	ID     int64  `json:"id"`
+	UUID   string `json:"uuid"`
+	RepoID int64  `json:"repo_id"`
+	// ParentID is the enclosing folder, or nil for a root folder.
+	// Cycle safety (a folder may not be moved under its own
+	// descendant) and the depth cap are enforced at the store
+	// boundary, not here.
+	ParentID *int64 `json:"parent_id,omitempty"`
+	Name     string `json:"name"`
+	// Position is the manual sibling order within the parent (0-based).
+	// Reads keep Name as the tie-break so an all-zero level still
+	// sorts deterministically.
+	Position  int       `json:"position"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// KanbanColumn is one lane of a repo's human-work Kanban board.
+//
+// Deliberately NOT called BoardColumn: that name is already a shipped
+// DTO meaning {state, label} (the static Agentic Pipeline column list),
+// and "Board" already means *repo* throughout this codebase. The Kanban
+// is a SEPARATE AXIS from Issue.State — State stays the agent/pipeline
+// lifecycle, KanbanColumnID is the lane a human dragged the card into.
+// An issue is on the board if and only if its KanbanColumnID is
+// non-nil, which is what stops a `todo` card double-rendering on both
+// the Kanban and the Agentic Pipeline's Backlog.
+type KanbanColumn struct {
+	ID     int64  `json:"id"`
+	UUID   string `json:"uuid"`
+	RepoID int64  `json:"repo_id"`
+	Name   string `json:"name"`
+	// Position is the left-to-right lane order (0-based).
+	Position  int       `json:"position"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Feature struct {
@@ -172,9 +287,25 @@ type Issue struct {
 	// Store.ReorderIssue, so the queue order survives reloads rather
 	// than living in board-local display state. No omitempty: the field
 	// is always visible so the Pipeline reads it without a fallback.
-	Priority  int       `json:"priority"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Priority int `json:"priority"`
+	// KanbanColumnID / KanbanPosition place this card on the human
+	// Kanban board — an axis ORTHOGONAL to State (see KanbanColumn).
+	// nil column id = the card is not on the Kanban at all, which is
+	// the default for a git repo (a workspace's `issue add` seeds the
+	// first lane instead). That nil-means-absent rule is what keeps the
+	// Kanban and the Agentic Pipeline from rendering the same `todo`
+	// card twice with two different drag semantics. Deleting a lane
+	// sets this back to nil (ON DELETE SET NULL) — cards fall off the
+	// board, they are never deleted with it.
+	//
+	// KanbanPosition is the manual top-to-bottom order within the lane
+	// (0-based) — the lane-scoped sibling of Priority, which orders the
+	// Pipeline's Backlog / Shipping columns. Meaningless while
+	// KanbanColumnID is nil.
+	KanbanColumnID *int64    `json:"kanban_column_id,omitempty"`
+	KanbanPosition int       `json:"kanban_position"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 	// EngineMode / EnginePauseReason are the per-issue controller-engine
 	// fields, meaningful only while the issue is in_pipeline. EngineMode
 	// is "off" (manual Start advances one job) or "auto" (the engine

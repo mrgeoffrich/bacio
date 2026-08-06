@@ -34,6 +34,11 @@ type ImportResult struct {
 	Comments        int `json:"comments"`
 	FeatureComments int `json:"feature_comments"`
 	Documents       int `json:"documents"`
+	// DocFolders / KanbanColumns count the two container record kinds
+	// seen on disk. omitempty so a pre-pivot sync repo keeps today's
+	// JSON shape byte-for-byte.
+	DocFolders    int `json:"doc_folders,omitempty"`
+	KanbanColumns int `json:"kanban_columns,omitempty"`
 
 	Inserted int `json:"inserted"`
 	Updated  int `json:"updated"`
@@ -60,7 +65,9 @@ type ImportResult struct {
 // run re-evaluates; the export phase writes the newer local content
 // out on this same run.
 type SkippedStaleEntry struct {
-	Kind          string `json:"kind"` // "issue" | "feature" | "document"
+	// Kind is "issue" | "feature" | "document" | "doc_folder" |
+	// "kanban_column" — the store.SyncKind* vocabulary.
+	Kind          string `json:"kind"`
 	UUID          string `json:"uuid"`
 	Label         string `json:"label,omitempty"` // issue key, feature slug, or doc filename
 	LocalUpdated  string `json:"local_updated_at"`
@@ -79,7 +86,12 @@ type RenumberEntry struct {
 // RenameEntry records one feature/document rename driven by the
 // collision-resolution phase.
 type RenameEntry struct {
-	Kind   string `json:"kind"` // "feature" | "document"
+	// Kind is "feature" | "document" | "doc_folder" | "kanban_column".
+	// The container kinds arrive here for a different reason than the
+	// first two: their record folder is named by uuid rather than by
+	// their label, so git cannot stop two containers claiming the same
+	// name and the importer resolves it — see import_containers.go.
+	Kind   string `json:"kind"`
 	Prefix string `json:"prefix"`
 	UUID   string `json:"uuid"`
 	Old    string `json:"old"`
@@ -126,6 +138,26 @@ type scannedRepo struct {
 	Issues    map[string]*scannedIssue    // by uuid
 	Documents map[string]*scannedDocument // by uuid
 	// Comments are scanned per-issue; they live inside scannedIssue.
+
+	// Workspace is the parsed repos/<prefix>/workspace.yaml sentinel, or
+	// nil when the prefix is a git repo. Presence — not any key inside
+	// repo.yaml — is what makes an imported prefix a workspace.
+	Workspace *ParsedWorkspace
+
+	DocFolders    map[string]*scannedDocFolder    // by uuid
+	KanbanColumns map[string]*scannedKanbanColumn // by uuid
+}
+
+// scannedDocFolder is one parsed repos/<p>/folders/<uuid>/folder.yaml.
+type scannedDocFolder struct {
+	Parsed *ParsedDocFolder
+	Folder string
+}
+
+// scannedKanbanColumn is one parsed repos/<p>/kanban/<uuid>/column.yaml.
+type scannedKanbanColumn struct {
+	Parsed *ParsedKanbanColumn
+	Folder string
 }
 
 type scannedFeature struct {
@@ -223,6 +255,8 @@ func (e *Engine) Import(ctx context.Context, source string) (*ImportResult, erro
 		res.Features += len(sr.Features)
 		res.Issues += len(sr.Issues)
 		res.Documents += len(sr.Documents)
+		res.DocFolders += len(sr.DocFolders)
+		res.KanbanColumns += len(sr.KanbanColumns)
 		for _, si := range sr.Issues {
 			res.Comments += len(si.Comments)
 		}
@@ -311,6 +345,30 @@ func (e *Engine) applyImport(ctx context.Context, tx *sql.Tx, source string, sca
 		if err := e.applyDocuments(tx, sr, repo, res); err != nil {
 			return fmt.Errorf("apply documents for %s: %w", sr.Prefix, err)
 		}
+		// Container records last, in two stages each: the record rows
+		// first (folders parent-before-child so a parent_uuid always
+		// resolves; lanes have no hierarchy but follow the same shape),
+		// then membership.
+		//
+		// Membership MUST come after applyDocuments / applyIssues: it
+		// writes documents.folder_id and issues.kanban_column_id, and
+		// those columns are deliberately absent from the member UPDATE
+		// statements above (nothing about placement serialises into
+		// doc.yaml / issue.yaml) so the two passes never fight.
+		appliedFolders, err := e.applyDocFolders(tx, sr, repo, res)
+		if err != nil {
+			return fmt.Errorf("apply doc folders for %s: %w", sr.Prefix, err)
+		}
+		appliedColumns, err := e.applyKanbanColumns(tx, sr, repo, res)
+		if err != nil {
+			return fmt.Errorf("apply kanban columns for %s: %w", sr.Prefix, err)
+		}
+		if err := e.applyDocFolderMembership(tx, sr, repo, appliedFolders, res); err != nil {
+			return fmt.Errorf("apply doc folder membership for %s: %w", sr.Prefix, err)
+		}
+		if err := e.applyKanbanMembership(tx, sr, repo, appliedColumns, res); err != nil {
+			return fmt.Errorf("apply kanban membership for %s: %w", sr.Prefix, err)
+		}
 	}
 	// Phase 4: deletions. Bootstrap flows (sync init attach, sync
 	// clone) skip this — they treat import as an additive merge so
@@ -363,16 +421,27 @@ func (e *Engine) upsertRepo(tx *sql.Tx, sr *scannedRepo, res *ImportResult) (*mo
 			return nil, fmt.Errorf("prefix %q is already used by repo %s locally; refusing to merge with uuid %s",
 				parsed.Prefix, conflictUUID.String, parsed.UUID)
 		}
-		// Insert a phantom row. The CLI doesn't have a "current
+		// Insert a pathless row. The CLI doesn't have a "current
 		// working tree" for an arbitrary imported prefix, so path
 		// stays empty — resolveRepo() will only pick a phantom up
 		// once the user runs bacio from inside the matching tree.
 		// created_at / updated_at come from repo.yaml so the
 		// round-trip preserves history.
-		if _, err := tx.Exec(
-			`INSERT INTO repos (uuid, prefix, name, path, remote_url, next_issue_number, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?, ?, ?)`,
-			parsed.UUID, parsed.Prefix, parsed.Name, parsed.RemoteURL, parsed.NextIssueNumber,
-			sqliteTimestamp(parsed.CreatedAt), sqliteTimestamp(parsed.UpdatedAt),
+		//
+		// The kind comes from the sibling workspace.yaml sentinel, never
+		// from repo.yaml. Routed through store.InsertPhantomRepoTx
+		// rather than a raw INSERT here so the (kind, path) invariant —
+		// a workspace is permanently pathless — is enforced by the same
+		// store-boundary code every other transport goes through. The
+		// helper takes no path parameter at all, so the invariant holds
+		// by construction for both kinds.
+		kind := model.RepoKindGit
+		if sr.Workspace != nil {
+			kind = model.RepoKindWorkspace
+		}
+		if err := store.InsertPhantomRepoTx(
+			tx, parsed.UUID, parsed.Prefix, parsed.Name, kind, parsed.RemoteURL,
+			parsed.NextIssueNumber, sqliteTimestamp(parsed.CreatedAt), sqliteTimestamp(parsed.UpdatedAt),
 		); err != nil {
 			return nil, fmt.Errorf("insert phantom repo %s: %w", parsed.Prefix, err)
 		}
@@ -386,7 +455,34 @@ func (e *Engine) upsertRepo(tx *sql.Tx, sr *scannedRepo, res *ImportResult) (*mo
 		}
 		return repo, nil
 	}
-	// DB row exists. Patch fields that may have shifted on the
+	// DB row exists. A prefix imported by an OLDER bacio landed as an
+	// inert phantom (that binary can't see workspace.yaml), so promote
+	// it once a sentinel shows up. Only ever a promotion:
+	//
+	//   - The sentinel's ABSENCE is not evidence of anything — an older
+	//     binary's export simply never writes the file — so a local
+	//     workspace is never demoted back to git. Demoting on absence
+	//     would silently destroy every workspace on the first sync with
+	//     a mixed-version peer.
+	//   - A row that already has a working tree is never promoted: a
+	//     workspace must stay pathless, and a prefix collision between a
+	//     real checkout here and a workspace elsewhere is a user problem
+	//     to surface, not one to paper over by breaking the invariant.
+	if sr.Workspace != nil && !existing.IsWorkspace() {
+		if existing.HasWorkingTree() {
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"prefix %s is a workspace in the sync repo but a git checkout locally (%s); leaving the local row alone",
+				parsed.Prefix, existing.Path))
+		} else if _, err := tx.Exec(
+			`UPDATE repos SET kind = ?, updated_at = ? WHERE uuid = ?`,
+			string(model.RepoKindWorkspace), sqliteTimestamp(now), parsed.UUID,
+		); err != nil {
+			return nil, fmt.Errorf("promote repo %s to workspace: %w", parsed.Prefix, err)
+		} else {
+			existing.Kind = model.RepoKindWorkspace
+		}
+	}
+	// Patch fields that may have shifted on the
 	// remote: name, remote_url, next_issue_number. next_issue_number
 	// is monotonic — see the function docstring; never let the remote
 	// drag the local cache backwards.
@@ -424,6 +520,16 @@ func (e *Engine) propagateDeletes(tx *sql.Tx, scan *scanResult, res *ImportResul
 		{store.SyncKindIssue, "issues"},
 		{store.SyncKindFeature, "features"},
 		{store.SyncKindDocument, "documents"},
+		// Container records. Ordering inside this list only matters for
+		// the audit-log order; the two container kinds carry no FKs
+		// between them. Deleting a doc_folder cascades to its child
+		// folders and NULLs documents.folder_id; deleting a
+		// kanban_column NULLs issues.kanban_column_id (both via the
+		// schema's ON DELETE clauses) — the members themselves are never
+		// touched, which is exactly right: dropping a container drops
+		// placement, never content.
+		{store.SyncKindDocFolder, "doc_folders"},
+		{store.SyncKindKanbanColumn, "kanban_columns"},
 	}
 	for _, k := range kinds {
 		rows, err := tx.Query(`SELECT uuid FROM sync_state WHERE kind = ?`, k.Name)
@@ -457,6 +563,18 @@ func (e *Engine) propagateDeletes(tx *sql.Tx, scan *scanResult, res *ImportResul
 				Label: label,
 			})
 		}
+	}
+	// Deleting a kanban_columns row lets the FK clear
+	// issues.kanban_column_id but leaves the in-lane index behind, so a
+	// card that is no longer on any board keeps a stale kanban_position.
+	// store.DeleteKanbanColumn resets it explicitly for the same reason;
+	// do the same here for the sync-driven delete. Deliberately does not
+	// touch issues.updated_at — board placement never serialises into
+	// issue.yaml, so churning the LWW gate for it would be pure noise.
+	if _, err := tx.Exec(
+		`UPDATE issues SET kanban_position = 0 WHERE kanban_column_id IS NULL AND kanban_position != 0`,
+	); err != nil {
+		return fmt.Errorf("reset orphaned kanban positions: %w", err)
 	}
 	return nil
 }
@@ -499,15 +617,24 @@ func (e *Engine) featureIDByUUIDTx(tx *sql.Tx, uuid string) (int64, error) {
 
 func (e *Engine) getRepoByUUIDTx(tx *sql.Tx, uuid string) (*model.Repo, error) {
 	var r model.Repo
+	// `kind` is projected so callers can use the model.Repo predicates
+	// (IsWorkspace / IsPhantom / HasWorkingTree) rather than re-deriving
+	// them from a bare `path == ""` test, which no longer disambiguates
+	// a phantom from a workspace.
 	err := tx.QueryRow(
-		`SELECT id, uuid, prefix, name, path, remote_url, next_issue_number, created_at, updated_at FROM repos WHERE uuid = ?`,
+		`SELECT id, uuid, prefix, name, kind, path, remote_url, next_issue_number, created_at, updated_at FROM repos WHERE uuid = ?`,
 		uuid,
-	).Scan(&r.ID, &r.UUID, &r.Prefix, &r.Name, &r.Path, &r.RemoteURL, &r.NextIssueNumber, &r.CreatedAt, &r.UpdatedAt)
+	).Scan(&r.ID, &r.UUID, &r.Prefix, &r.Name, &r.Kind, &r.Path, &r.RemoteURL, &r.NextIssueNumber, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if r.Kind == "" {
+		// Legacy rows written before the kind column existed read as
+		// git, matching the column's DEFAULT and model's predicates.
+		r.Kind = model.RepoKindGit
 	}
 	return &r, nil
 }
@@ -543,6 +670,13 @@ func (e *Engine) fetchLabelForUUIDTx(tx *sql.Tx, table, uuid string) (string, er
 			return "", err
 		}
 		return filename, nil
+	case "doc_folders", "kanban_columns":
+		var name string
+		err := tx.QueryRow(fmt.Sprintf(`SELECT name FROM %s WHERE uuid = ?`, table), uuid).Scan(&name)
+		if err != nil {
+			return "", err
+		}
+		return name, nil
 	case "comments":
 		// Comments don't have a friendly label; fall back to uuid.
 		return "", nil

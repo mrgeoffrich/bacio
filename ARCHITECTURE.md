@@ -4,7 +4,7 @@ A one-shot onboarding read for the bacio codebase. Covers the mental model — w
 
 ## The big picture in one paragraph
 
-`bacio` is a kanban for one developer (or a small team), driven mostly by Claude Code. The whole project ships as **one Go binary** (`bacio`) plus an **optional desktop wrapper** (`bacio-desktop`). All state lives in a **single SQLite store at `~/.bacio/db.sqlite`** — there is no daemon, no server-process-you-must-keep-running. Every surface (CLI, TUI, HTTP API, web bundle, desktop app, agent integration) is a different entry point into the same store. The same React tree powers both the desktop app and the browser-served bundle. Concurrent processes coordinate through a leader lease in the DB; only one of them runs the background tickers at a time.
+`bacio` is a **kanban and an agent orchestrator** for one developer (or a small team), driven mostly by Claude Code. It tracks work in **git repos and in non-git workspaces** — a workspace is a `repos` row with no working tree, for the planning, notes and errands that don't belong to a checkout. The whole project ships as **one Go binary** (`bacio`) plus an **optional desktop wrapper** (`bacio-desktop`). All state lives in a **single SQLite store at `~/.bacio/db.sqlite`** — there is no daemon, no server-process-you-must-keep-running. Every surface (CLI, TUI, HTTP API, web bundle, desktop app, agent integration) is a different entry point into the same store. The same React tree powers both the desktop app and the browser-served bundle. Concurrent processes coordinate through a leader lease in the DB; only one of them runs the background tickers at a time.
 
 ## Binaries
 
@@ -31,7 +31,7 @@ There is no `bacio-server`, no `bacio-daemon`, no `bacio-sync-worker`. Every lon
 | Process | Lifecycle | What it does |
 |---|---|---|
 | CLI subcommand (`bacio issue add` etc.) | One-shot | Opens DB, mutates, exits. |
-| `bacio tui` | Long-running (user-bound) | Interactive kanban; also runs leader-gated tickers when it holds the lease. |
+| `bacio tui` | Long-running (user-bound) | Interactive terminal board, keyed on issue `state` (the Agentic Pipeline's twin — it has no Kanban lanes); also runs leader-gated tickers when it holds the lease. |
 | `bacio api` | Long-running | HTTP API only. No `/ui/` mount; serves 404 there (BACI-72). |
 | `bacio web` | Long-running | HTTP API **plus** the embedded React bundle at `/ui/`, **plus** opens the OS default browser. The one-liner humans want. By default also opens a second `/anthropic`-only listener on the proxy port (BACI-344; `--no-proxy` opts out). |
 | `bacio proxy serve` | Long-running (rarely restarted) | BACI-344: standalone reverse-proxy listener — hosts ONLY `/anthropic/*` (+ `/healthz` + `/version`) on the **stable proxy port** (API port − 1). The process agents pin via `ANTHROPIC_BASE_URL`; splitting it off `bacio web` lets the UI / binary / schema be upgraded without interrupting in-flight agent turns. Keep it alive with `bacio proxy install-service` (launchd / systemd user unit). |
@@ -47,7 +47,7 @@ The long-running processes (`bacio tui` / `api` / `web` / `channel` / desktop) a
 
 A single SQLite file in WAL mode. All issues, features, comments, documents, tags, agent registry, dispatches, audit log — everything — lives here. Schema is migrated at startup by `internal/store`. WAL gives concurrent readers; writes serialize.
 
-Multiple repos coexist in one DB, keyed by repo prefix (`BACI`, `MINI`, …). `bacio init` allocates a prefix; running any mutating CLI command from a fresh git repo auto-allocates one if `init` hasn't been called.
+Multiple repos coexist in one DB, keyed by repo prefix (`BACI`, `MINI`, …). `bacio init` allocates a prefix; running any mutating CLI command from a fresh git repo auto-allocates one if `init` hasn't been called. A **workspace** shares that prefix namespace and that `repos` table — see the next section.
 
 ### `~/.bacio/worktrees.yaml` — per-user registry
 
@@ -60,6 +60,47 @@ Optional. Written by `bacio worktree init`. Pins the bacio instance in that work
 ### `~/sync/<project>/` — git-backed sync mirror (opt-in)
 
 Optional. Mirrors the SQLite slice for one project as YAML + markdown in a separate git repo. `bacio sync` pulls → imports → exports → commits → pushes. Designed for sharing one board across machines or with a teammate. See [getting-started.md §4](docs/getting-started.md#4-sync-across-machines-when-youre-ready).
+
+## Containers: git repos and workspaces
+
+Everything bacio tracks hangs off a `repos` row. `repos.kind` discriminates the two container shapes, and the pair `(kind, path)` is the complete truth table:
+
+| `kind` | `path` | Meaning |
+|---|---|---|
+| `git` | `''` | **Phantom** — a prefix imported from sync with no checkout on this machine. |
+| `git` | `/abs/…` | A **linked git repo** with a working tree here. |
+| `workspace` | `''` | A **workspace** — a bacio-only container with no git anything. Invariant, enforced at the store boundary. |
+| `workspace` | non-empty | **Impossible.** `validateRepoKindPath` (`internal/store/repos.go`) rejects it, and every exported creator funnels through the single `insertRepo` so no caller can route around the check. |
+
+`path == ""` used to be overloaded to mean "phantom" and nothing else, so **a bare `repo.Path == ""` comparison is now wrong**. Three predicates on `model.Repo` carry the table and are the only correct way to ask:
+
+- `IsWorkspace()` — `Kind == RepoKindWorkspace`.
+- `IsPhantom()` — `!IsWorkspace() && Path == ""`. Written that way, not as `Kind == RepoKindGit`, because a `model.Repo` constructed in Go (sync importer, tests) has `Kind == ""`; the negative form treats `""` as git, matching the column's `DEFAULT 'git'`.
+- `HasWorkingTree()` — `Path != ""`.
+
+A workspace has no cwd signal, so `git.Detect` can never find one. The global `--repo <PREFIX>` flag (falling back to `$BACIO_REPO`) short-circuits `resolveRepoC` (`internal/cli/context.go`) *before* detection and is the only way to drive a workspace from the CLI. `bacio workspace add|list|rm` creates and removes them; the React `RepoPicker` offers **Add Git Repository…** / **New Workspace…**.
+
+What a workspace deliberately can't do: hold a `.bacio/config.yaml`, so it can't be set up for sync or drive a sync tick of its own (`client.SetupSync` refuses with a workspace-specific message); receive an agent dispatch (`refuseDispatchOnWorkspace` — there'd be no worktree for the worker); or take the filesystem-touching doc paths (`bacio doc export`, and `--from-path` / `source_path` on `doc upsert`), which refuse with a workspace-specific message rather than the git one. It is still **mirrored for free**: `Engine.Export` walks `store.ListRepos()` with no filter, so a workspace's issues, docs and folders land in the sync repo the moment *any* git repo on the machine drives a tick.
+
+## The two board axes: Agentic Pipeline vs Kanban
+
+There are two orthogonal ways a card can be placed, and keeping them orthogonal is what stops the same card rendering twice:
+
+| Axis | Column | Surface |
+|---|---|---|
+| Agent / pipeline lifecycle | `issues.state` (`model.State`) | The **Agentic Pipeline** (`/<prefix>/pipeline`) and the TUI board. |
+| The human lane | `issues.kanban_column_id` → `kanban_columns` | The **Kanban** (`/<prefix>/issues`). |
+
+> **A card is on the Kanban if and only if `kanban_column_id IS NOT NULL`.**
+
+`model.State` is untouched by the lane axis — `AllStates()` / `BoardColumnStates()` are unchanged, so `internal/tui/board.go` and `desktop/boardservice.go`'s `ListColumns` need no work: the TUI board is state-keyed and knows nothing about lanes. Lanes are per-repo rows (`Backlog / Doing / Waiting / Done` seeded by `BootstrapKanbanColumns`, wired into `BootstrapRepoDefaults`), renameable and reorderable.
+
+The defaults differ by container kind, and that difference lives on the create path in `internal/client/local_issue.go`, not in the store:
+
+- **Workspace** — `issue add` drops the new card on the first lane, so everything is on the board by default. The Agentic Pipeline nav entry is hidden (nowhere for a worker to run), and `homeView()` lands a workspace on the Kanban instead.
+- **Git repo** — `issue add` leaves `kanban_column_id` NULL. The card lives on the Pipeline Backlog only until someone drags it onto the Kanban or runs `bacio kanban move <KEY> --column <NAME>`; from then on it is on both, deliberately and by user action.
+
+Naming: `KanbanColumn` end-to-end (`model.KanbanColumn`, `kanban_columns`, `api.listKanbanColumns`, `components/kanban/`). The pre-existing `BoardColumn` DTO is `{state, label}` — one bacio *state*, consumed by the Pipeline and the Settings pane — and is unrelated.
 
 ## The leader-elected controller
 
@@ -84,7 +125,7 @@ Every leader-gated piece of background work — including [BACI-89 background sy
 
 The CLI binary `//go:embed`s `webui/`. **`bacio web` mounts the bundle at `/ui/` and pops the browser; `bacio api` is API-only after BACI-72 and returns 404 on `/ui/`.** Reach for `bacio web` whenever the UI is in the loop — including agent-driven Playwright smoke testing (`bacio web --no-open` is the right flag, then drive with the `playwright-cli` skill).
 
-Client-side routing via `react-router` v7, `<BrowserRouter>` on both surfaces (BACI-203). Basename derives from `import.meta.env.BASE_URL` so the same source tree resolves to `/ui` in web mode and `/` in desktop mode; both asset servers (`internal/api/static.go` for `bacio web`, `application.AssetFileServerFS` for Wails) implement SPA fallback on unknown paths. See [`docs/web-app-mode.md`](docs/web-app-mode.md) §7a for the route map and the path-helper module at `desktop/frontend/src/lib/routes.ts`.
+Client-side routing via `react-router` v7, `<BrowserRouter>` on both surfaces (BACI-203). Basename derives from `import.meta.env.BASE_URL` so the same source tree resolves to `/ui` in web mode and `/` in desktop mode; both asset servers (`internal/api/static.go` for `bacio web`, `application.AssetFileServerFS` for Wails) implement SPA fallback on unknown paths. Every page hangs off the active repo prefix — `/<prefix>/pipeline` is the Agentic Pipeline, **`/<prefix>/issues` is the Kanban** (the `board` nav view; `/<prefix>/issues/:key` is the per-issue workspace under it), `/<prefix>/documents` the page tree. See [`docs/web-app-mode.md`](docs/web-app-mode.md) §7a for the full route map and the path-helper module at `desktop/frontend/src/lib/routes.ts`.
 
 Markdown rendering across both surfaces follows one rule: every read surface in the React tree goes through `<MarkdownView>` (`desktop/frontend/src/lib/markdownView.tsx`); never `react-markdown` directly. The TUI side uses `internal/tui/markdown.go`'s `renderMarkdown` (glamour). See [`docs/markdown-rendering.md`](docs/markdown-rendering.md).
 
@@ -174,6 +215,9 @@ internal/
   cli/                       # cobra commands, inputs/, schema.go, install-*.go
   cli/inputs/                # *Input structs reflected for --json + bacio schema
   store/                     # SQLite + migrations + validators + lookups
+                             #   repos.kind = git | workspace (see "Containers" above)
+                             #   doc_folders    — the page tree (parent_id self-FK, uuid-addressed)
+                             #   kanban_columns — the human lanes (issues.kanban_column_id)
   model/                     # domain types (Issue, Feature, AgentDispatch, …)
   model/prompttemplates/     # legacy: embedded built-in prompt bodies (prompts/agents/ now)
   api/                       # HTTP handlers for bacio api / bacio web

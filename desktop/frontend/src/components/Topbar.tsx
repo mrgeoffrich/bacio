@@ -6,6 +6,7 @@ import Tooltip from './Tooltip';
 import NotificationBell from './NotificationBell';
 import ShippedPopover from './ShippedPopover';
 import { WEB_MODE } from '../env';
+import type { RepoKind } from '../api';
 import { viewPath, viewFromPath } from '../lib/routes';
 import { syncBadgeState } from '../lib/syncBadge';
 import { useActiveRepo } from '../state/RepoProvider';
@@ -20,14 +21,38 @@ import { useNotifications } from '../state/useNotifications';
 // Agents tab is also available in web mode — the bacio api ships the
 // composite GET /agents/cards endpoint that assembles the AgentCard
 // shape server-side.
-export const NAV = [
-  { view: 'pipeline', label: 'Pipeline' },
+//
+// The two boards sit side by side at the head of the list, and the labels
+// say which is which: "Agentic Pipeline" is the agent-driven lifecycle
+// (issue `state`), "Kanban" is the human work board (lanes, orthogonal to
+// state). Only the LABEL changed on the first entry — the `pipeline` view id
+// is load-bearing across routes.ts, App's routes and redirects,
+// RepoProvider's legacy page words, the `is-pipeline` shell class and
+// ProcessEditor's back-navigation.
+export type NavItem = { view: string; label: string };
+
+export const NAV: NavItem[] = [
+  { view: 'pipeline', label: 'Agentic Pipeline' },
+  { view: 'board', label: 'Kanban' },
   { view: 'features', label: 'Features' },
   { view: 'docs', label: 'Documents' },
   { view: 'agents', label: 'Agents' },
   { view: 'history', label: 'History' },
   { view: 'monitor', label: 'Monitor' },
 ];
+
+// navForKind is the nav the active repo actually gets. A workspace has no
+// working tree, so a dispatched agent would have nowhere to work — the
+// Agentic Pipeline entry is hidden there (locked decision D1). The Kanban
+// entry is never hidden: it is the one board every repo kind has.
+//
+// Exported (and consumed by App as well as the render below) because the
+// digit hotkeys map onto this list by position — filtering it in only one of
+// the two places would silently desync the keyboard from the buttons.
+export function navForKind(kind?: RepoKind): NavItem[] {
+  if (kind !== 'workspace') return NAV;
+  return NAV.filter(item => item.view !== 'pipeline');
+}
 
 // BACI-361: the topbar reads its live data from the state hooks rather than
 // the ~18 props App used to drill in. Only the three shell-owned overlay
@@ -105,7 +130,7 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
       </div>
 
       <div className="mk-segmented">
-        {NAV.map(({ view, label }) => {
+        {navForKind(board?.kind).map(({ view, label }) => {
           const isAgents = view === 'agents';
           const button = (
             <button

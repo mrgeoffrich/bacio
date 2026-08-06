@@ -12,6 +12,7 @@ function board(over: Partial<Board> = {}): Board {
   return {
     prefix: 'OPER',
     name: 'operation-money-worries',
+    kind: 'git',
     issueCount: 0,
     syncEnabled: false,
     syncBackgroundEnabled: false,

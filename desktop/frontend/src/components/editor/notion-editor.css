@@ -113,7 +113,7 @@
 }
 
 /* Placeholder */
-.notion-editor-content .ProseMirror p.is-editor-empty:first-child::before {
+.notion-editor-content p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
   color: var(--fg-4);
@@ -121,22 +121,29 @@
   height: 0;
 }
 
-/* Typography */
-.notion-editor-content .ProseMirror {
-  outline: none;
-}
-
-.notion-editor-content .ProseMirror > * {
+/* Typography
+ *
+ * These rules are flat (`.notion-editor-content h1`), NOT nested under a
+ * `.ProseMirror` descendant. TipTap puts the editorProps class on the
+ * ProseMirror root ITSELF — the element ends up as
+ * `class="tiptap ProseMirror notion-editor-content"` — so a
+ * `.notion-editor-content .ProseMirror h1` selector describes a
+ * ProseMirror inside a ProseMirror and matches nothing. The whole
+ * typography block silently did nothing until this was fixed, which is
+ * why tables rendered borderless and task-list checkboxes stacked above
+ * their labels. If you add a rule here, keep it flat.
+ */
+.notion-editor-content > * {
   margin-top: 0;
   margin-bottom: 4px;
 }
 
-.notion-editor-content .ProseMirror > * + * {
+.notion-editor-content > * + * {
   margin-top: 8px;
 }
 
 /* Headings */
-.notion-editor-content .ProseMirror h1 {
+.notion-editor-content h1 {
   font-size: 2.5em;
   font-weight: 700;
   line-height: 1.2;
@@ -144,7 +151,7 @@
   margin-bottom: 8px;
 }
 
-.notion-editor-content .ProseMirror h2 {
+.notion-editor-content h2 {
   font-size: 1.875em;
   font-weight: 600;
   line-height: 1.3;
@@ -152,7 +159,7 @@
   margin-bottom: 6px;
 }
 
-.notion-editor-content .ProseMirror h3 {
+.notion-editor-content h3 {
   font-size: 1.5em;
   font-weight: 600;
   line-height: 1.4;
@@ -161,38 +168,38 @@
 }
 
 /* Paragraphs */
-.notion-editor-content .ProseMirror p {
+.notion-editor-content p {
   margin: 4px 0;
   min-height: 1em;
 }
 
 /* Lists */
-.notion-editor-content .ProseMirror ul,
-.notion-editor-content .ProseMirror ol {
+.notion-editor-content ul,
+.notion-editor-content ol {
   padding-left: 28px;
   margin: 8px 0;
 }
 
-.notion-editor-content .ProseMirror li {
+.notion-editor-content li {
   margin: 4px 0;
 }
 
-.notion-editor-content .ProseMirror ul li {
+.notion-editor-content ul li {
   list-style-type: disc;
 }
 
-.notion-editor-content .ProseMirror ol li {
+.notion-editor-content ol li {
   list-style-type: decimal;
 }
 
 /* Task Lists */
-.notion-editor-content .ProseMirror ul[data-type="taskList"] {
+.notion-editor-content ul[data-type="taskList"] {
   list-style: none;
   padding: 0;
   margin-left: 0;
 }
 
-.notion-editor-content .ProseMirror ul[data-type="taskList"] li {
+.notion-editor-content ul[data-type="taskList"] li {
   display: block !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -200,7 +207,7 @@
   list-style-type: none !important;
 }
 
-.notion-editor-content .ProseMirror ul[data-type="taskList"] li > label {
+.notion-editor-content ul[data-type="taskList"] li > label {
   display: inline !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -208,7 +215,7 @@
   vertical-align: top !important;
 }
 
-.notion-editor-content .ProseMirror ul[data-type="taskList"] li > div {
+.notion-editor-content ul[data-type="taskList"] li > div {
   display: inline !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -218,11 +225,11 @@
   width: calc(100% - 26px) !important;
 }
 
-.notion-editor-content .ProseMirror ul[data-type="taskList"] li > label > span {
+.notion-editor-content ul[data-type="taskList"] li > label > span {
   display: none !important;
 }
 
-.notion-editor-content .ProseMirror ul[data-type="taskList"] li > div > p {
+.notion-editor-content ul[data-type="taskList"] li > div > p {
   margin: 0 !important;
   padding: 0 !important;
   display: inline !important;
@@ -230,12 +237,12 @@
   line-height: 1.6 !important;
 }
 
-.notion-editor-content .ProseMirror ul[data-type="taskList"] li > div > p > code {
+.notion-editor-content ul[data-type="taskList"] li > div > p > code {
   display: inline !important;
   vertical-align: baseline !important;
 }
 
-.notion-editor-content .ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+.notion-editor-content ul[data-type="taskList"] input[type="checkbox"] {
   cursor: pointer;
   width: 18px;
   height: 18px;
@@ -246,7 +253,7 @@
 }
 
 /* Blockquote */
-.notion-editor-content .ProseMirror blockquote {
+.notion-editor-content blockquote {
   padding-left: 16px;
   border-left: 3px solid var(--border-2);
   color: var(--fg-3);
@@ -255,7 +262,7 @@
 }
 
 /* Code Block */
-.notion-editor-content .ProseMirror pre {
+.notion-editor-content pre {
   background: var(--ink-50);
   border-radius: var(--radius-md);
   padding: 16px;
@@ -266,7 +273,7 @@
   line-height: 1.5;
 }
 
-.notion-editor-content .ProseMirror pre code {
+.notion-editor-content pre code {
   background: none;
   padding: 0;
   color: inherit;
@@ -275,7 +282,7 @@
 }
 
 /* Inline Code */
-.notion-editor-content .ProseMirror code {
+.notion-editor-content code {
   background: var(--ink-50);
   padding: 2px 6px;
   border-radius: var(--radius-sm);
@@ -285,40 +292,40 @@
 }
 
 /* Horizontal Rule */
-.notion-editor-content .ProseMirror hr {
+.notion-editor-content hr {
   border: none;
   border-top: 1px solid var(--border-1);
   margin: 24px 0;
 }
 
 /* Text Formatting */
-.notion-editor-content .ProseMirror strong {
+.notion-editor-content strong {
   font-weight: 600;
 }
 
-.notion-editor-content .ProseMirror em {
+.notion-editor-content em {
   font-style: italic;
 }
 
-.notion-editor-content .ProseMirror u {
+.notion-editor-content u {
   text-decoration: underline;
 }
 
-.notion-editor-content .ProseMirror s {
+.notion-editor-content s {
   text-decoration: line-through;
 }
 
 /* Selection */
-.notion-editor-content .ProseMirror ::selection {
+.notion-editor-content ::selection {
   background: var(--sky-100);
 }
 
-.notion-editor-content .ProseMirror:focus {
+.notion-editor-content:focus {
   outline: none;
 }
 
 /* Tables */
-.notion-editor-content .ProseMirror table.tiptap-table {
+.notion-editor-content table {
   border-collapse: collapse;
   table-layout: fixed;
   width: 100%;
@@ -328,8 +335,8 @@
   border-radius: var(--radius-md);
 }
 
-.notion-editor-content .ProseMirror table.tiptap-table td,
-.notion-editor-content .ProseMirror table.tiptap-table th {
+.notion-editor-content table td,
+.notion-editor-content table th {
   min-width: 100px;
   border: 1px solid var(--border-1);
   padding: 8px 12px;
@@ -338,22 +345,22 @@
   position: relative;
 }
 
-.notion-editor-content .ProseMirror table.tiptap-table th {
+.notion-editor-content table th {
   font-weight: 600;
   text-align: left;
   background: var(--ink-50);
   color: var(--fg-1);
 }
 
-.notion-editor-content .ProseMirror table.tiptap-table td {
+.notion-editor-content table td {
   background: var(--bg-2);
 }
 
-.notion-editor-content .ProseMirror table.tiptap-table .selectedCell {
+.notion-editor-content table .selectedCell {
   background: var(--sky-50);
 }
 
-.notion-editor-content .ProseMirror table.tiptap-table .column-resize-handle {
+.notion-editor-content table .column-resize-handle {
   position: absolute;
   right: -2px;
   top: 0;
@@ -363,19 +370,19 @@
   pointer-events: none;
 }
 
-.notion-editor-content .ProseMirror table.tiptap-table td > *,
-.notion-editor-content .ProseMirror table.tiptap-table th > * {
+.notion-editor-content table td > *,
+.notion-editor-content table th > * {
   margin: 0;
 }
 
-.notion-editor-content .ProseMirror table.tiptap-table td p,
-.notion-editor-content .ProseMirror table.tiptap-table th p {
+.notion-editor-content table td p,
+.notion-editor-content table th p {
   margin: 0;
   min-height: 1em;
 }
 
-.notion-editor-content .ProseMirror table.tiptap-table td:hover,
-.notion-editor-content .ProseMirror table.tiptap-table th:hover {
+.notion-editor-content table td:hover,
+.notion-editor-content table th:hover {
   background: var(--bg-4);
 }
 
@@ -385,12 +392,12 @@
     padding: 32px 24px;
   }
 
-  .notion-editor-content .ProseMirror table.tiptap-table {
+  .notion-editor-content table {
     font-size: 14px;
   }
 
-  .notion-editor-content .ProseMirror table.tiptap-table td,
-  .notion-editor-content .ProseMirror table.tiptap-table th {
+  .notion-editor-content table td,
+  .notion-editor-content table th {
     min-width: 80px;
     padding: 6px 8px;
   }

@@ -24,9 +24,28 @@
 
 // ─── Board ───────────────────────────────────────────────────────────
 
+// RepoKind is the repos.kind discriminator: "git" for a repo backed by a
+// working tree (the default, and what a legacy empty value normalises to),
+// "workspace" for a manual, pathless container.
+//
+// It is a **string-literal union, deliberately NOT a Wails enum**. Enum
+// members are erased by the web build (api.http.ts ships Wails enum names
+// as types only), so a component that referenced `RepoKind.Workspace` at
+// runtime would type-check and then break `npm run build:web`. Compare
+// against the literals directly (`board.kind === 'workspace'`), or cast a
+// literal to the type (`'workspace' as RepoKind`) — never a member.
+export type RepoKind = 'git' | 'workspace';
+
 export interface Board {
   prefix: string;
   name: string;
+  // kind distinguishes a git-backed repo from a manual workspace. The
+  // React tree reads it to hide the Agentic Pipeline nav entry on a
+  // workspace (no worktree ⇒ a dispatched agent has nowhere to work) and
+  // to group the repository picker. Never blank on either wire: the Wails
+  // BoardService and the HTTP `model.Repo` both normalise the legacy
+  // empty value to "git" before serialising.
+  kind: RepoKind;
   issueCount: number;
   // BACI-89 background-sync status. syncEnabled = "this repo has git
   // sync configured"; the other three reflect the controller's
@@ -570,6 +589,23 @@ export interface DocSummary {
   archivedAt?: string;
   snippet?: string;
   links?: DocSummaryLink[];
+  // folderUuid is the doc-folder this page is filed under, or '' for the
+  // tree root. **Addressed by uuid, never the folder's numeric id** — uuid
+  // is the only folder identity that survives a sync round trip, and every
+  // folder mutator on both transports takes a uuid. '' is a meaningful
+  // value (the root is not itself a folder), so the field is required
+  // rather than optional.
+  //
+  // Cross-transport note: the Wails DocSummary carries `folderUuid`
+  // directly; the HTTP `Document` carries the numeric `folder_id`, which
+  // `api/wire/doc.ts` resolves through an id→uuid index built from the
+  // folder list. Neither transport ever exposes the raw id.
+  folderUuid: string;
+  // folderPosition is the page's sort key inside its folder. A SORT KEY,
+  // not a dense index — siblings may share one and the listing tie-breaks
+  // on filename, so every pre-pivot document sitting at 0 keeps its
+  // historical alphabetical order.
+  folderPosition: number;
 }
 
 export interface DocContent {
@@ -577,6 +613,83 @@ export interface DocContent {
   type: string;
   content: string;
   updatedAt: string;
+}
+
+// DocFolder is one node of the per-repo document tree.
+//
+// parentUuid is '' for a root folder — the tree root is not itself a
+// folder, so '' is a value rather than an absence, and it is the only way
+// to address the top level on either transport. The DTO deliberately
+// exposes NO numeric id: the HTTP wire's `parent_id` is reshaped through
+// an id→uuid index in `api/wire/doc.ts` so both transports land on the
+// same uuid-addressed shape.
+export interface DocFolder {
+  uuid: string;
+  name: string;
+  parentUuid: string;
+  // position is the manual sibling order within the parent (0-based).
+  // Reads tie-break on name, so an all-zero level still sorts stably.
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// DocFolderDeletePreview is the blast radius of deleting a folder, for the
+// confirmation dialog — the dry-run twin of deleteDocFolder. subfolders is
+// the number of DESCENDANT folders that go with it; documentsReRooted is
+// the number of pages in that whole subtree that get moved back to the
+// tree root. A folder delete never destroys a page.
+export interface DocFolderDeletePreview {
+  uuid: string;
+  name: string;
+  // path is the derived display path ("Design/API/Auth"), walked
+  // server-side; it is never stored.
+  path: string;
+  subfolders: number;
+  documentsReRooted: number;
+}
+
+// ─── Kanban ──────────────────────────────────────────────────────────
+//
+// The human lane axis, orthogonal to `state` and to the Agentic Pipeline.
+// A card is on the Kanban if and only if it appears in some lane's `cards`.
+//
+// NOT to be confused with `BoardColumn` above, which is `{state, label}` —
+// one bacio issue state, driving the Pipeline and the Settings pane. The
+// two are unrelated shapes with unrelated lifecycles.
+
+// KanbanCardRef is one card's placement in a lane. It is a reference, not
+// the card: the Kanban view joins these against `listCards(prefix)` for
+// titles, tags and assignees, exactly as the Pipeline does.
+export interface KanbanCardRef {
+  key: string;
+  position: number;
+}
+
+// KanbanColumn is one lane plus its ordered card references. Membership
+// rides on the CONTAINER, never on the card — the same shape the sync
+// layer uses (column.yaml lists issue uuids), and the reason BoardCard
+// carries no lane field.
+//
+// `cards` is always present (an empty lane is `[]`, never absent) so the
+// React side can map over it without a guard. Lanes are addressed by
+// `uuid`; the HTTP wire's numeric `id` / `repo_id` / timestamps are
+// dropped by the reshaper and never reach the contract.
+export interface KanbanColumn {
+  uuid: string;
+  name: string;
+  // position is the left-to-right lane order (0-based).
+  position: number;
+  cards: KanbanCardRef[];
+}
+
+// KanbanColumnDeletePreview is the blast radius of deleting a lane: the
+// cards it holds come OFF the board. The issues themselves are never
+// deleted.
+export interface KanbanColumnDeletePreview {
+  uuid: string;
+  name: string;
+  issuesRemovedFromBoard: number;
 }
 
 // ─── Features ────────────────────────────────────────────────────────

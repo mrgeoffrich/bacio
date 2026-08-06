@@ -21,7 +21,15 @@ import (
 // remote API server is responsible for its own resolution if it
 // chooses to support this).
 func resolveLabelViaRedirects(repo *model.Repo, kind, label string) (string, bool) {
-	if inRemoteMode() || repo == nil || repo.Path == "" {
+	// HasWorkingTree(), not `Path == ""`: redirects live in a sync repo
+	// discovered through the project's on-disk `.bacio/config.yaml`, so
+	// this needs a checkout. A WORKSPACE has none by design and a
+	// PHANTOM has none yet — both bow out here. There is no error to
+	// raise: this is a quiet best-effort retry that a caller only ever
+	// reaches after a NotFound, so bowing out just leaves the original
+	// NotFound in place, which is the honest answer for a repo that
+	// cannot have redirects.
+	if inRemoteMode() || repo == nil || !repo.HasWorkingTree() {
 		return "", false
 	}
 	cfg, err := sync.ReadProjectConfig(repo.Path)

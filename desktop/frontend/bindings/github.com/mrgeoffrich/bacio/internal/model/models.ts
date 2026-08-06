@@ -392,6 +392,25 @@ export class Issue {
      * is always visible so the Pipeline reads it without a fallback.
      */
     "priority": number;
+
+    /**
+     * KanbanColumnID / KanbanPosition place this card on the human
+     * Kanban board — an axis ORTHOGONAL to State (see KanbanColumn).
+     * nil column id = the card is not on the Kanban at all, which is
+     * the default for a git repo (a workspace's `issue add` seeds the
+     * first lane instead). That nil-means-absent rule is what keeps the
+     * Kanban and the Agentic Pipeline from rendering the same `todo`
+     * card twice with two different drag semantics. Deleting a lane
+     * sets this back to nil (ON DELETE SET NULL) — cards fall off the
+     * board, they are never deleted with it.
+     * 
+     * KanbanPosition is the manual top-to-bottom order within the lane
+     * (0-based) — the lane-scoped sibling of Priority, which orders the
+     * Pipeline's Backlog / Shipping columns. Meaningless while
+     * KanbanColumnID is nil.
+     */
+    "kanban_column_id"?: number | null;
+    "kanban_position": number;
     "created_at": time$0.Time;
     "updated_at": time$0.Time;
 
@@ -439,6 +458,9 @@ export class Issue {
         }
         if (!("priority" in $$source)) {
             this["priority"] = 0;
+        }
+        if (!("kanban_position" in $$source)) {
+            this["kanban_position"] = 0;
         }
         if (!("created_at" in $$source)) {
             this["created_at"] = null;

@@ -43,6 +43,7 @@ func newDocCmd() *cobra.Command {
 		docEditCmd(), docRenameCmd(), docExportCmd(), docDownloadCmd(), docRmCmd(),
 		docLinkCmd(), docUnlinkCmd(),
 		docArchiveCmd(), docUnarchiveCmd(),
+		newDocFolderCmd(), docMvCmd(),
 	)
 	return cmd
 }
@@ -279,6 +280,20 @@ func docAddCmd() *cobra.Command {
 	return cmd
 }
 
+// refuseSourcePathOnWorkspace guards `--from-path` / `source_path`.
+// The value is a REPO-RELATIVE path into a git working tree — the whole
+// point is that `bacio doc export --to-path` can later write it back —
+// and a workspace has no such tree. Storing one would record a path that
+// can never round-trip.
+func refuseSourcePathOnWorkspace(repo *model.Repo, sourcePath string) error {
+	if sourcePath == "" {
+		return nil
+	}
+	return refuseFilesystemVerbOnWorkspace(repo,
+		"--from-path / source_path names a file inside a git working tree and a workspace has none; "+
+			"pass the filename with --content / --content-file instead")
+}
+
 func createDocument(in *docInputs) error {
 	c, err := openClient()
 	if err != nil {
@@ -287,6 +302,9 @@ func createDocument(in *docInputs) error {
 	defer c.Close()
 	repo, err := resolveRepoC(c)
 	if err != nil {
+		return err
+	}
+	if err := refuseSourcePathOnWorkspace(repo, in.SourcePath); err != nil {
 		return err
 	}
 	d, err := c.CreateDocument(context.Background(), repo, client.DocCreateInput{
@@ -363,6 +381,9 @@ func upsertDocument(in *docInputs) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseSourcePathOnWorkspace(repo, in.SourcePath); err != nil {
+		return err
+	}
 	d, err := c.UpsertDocument(context.Background(), repo, client.DocCreateInput{
 		Filename:   in.Filename,
 		Type:       in.Type,
@@ -385,7 +406,6 @@ func upsertDocument(in *docInputs) error {
 func docListCmd() *cobra.Command {
 	var (
 		typeStr         string
-		repoPrefix      string
 		allRepos        bool
 		includeArchived bool
 	)
@@ -393,8 +413,10 @@ func docListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List documents in the current repo",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --repo is the global selector now — see the matching note
+			// on `bacio issue list`.
 			if root, ok := resolveSyncRepoRoot(); ok {
-				return listDocsFromSyncRepo(root, repoPrefix, allRepos, typeStr)
+				return listDocsFromSyncRepo(root, repoSelector(), allRepos, typeStr)
 			}
 			c, err := openClient()
 			if err != nil {
@@ -422,7 +444,6 @@ func docListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&typeStr, "type", "", "filter by type")
-	cmd.Flags().StringVar(&repoPrefix, "repo", "", "limit to a specific repo prefix; required when run inside a sync repo (or pass --all-repos)")
 	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "list across all tracked repos (only meaningful inside a sync repo)")
 	cmd.Flags().BoolVar(&includeArchived, "include-archived", false, "include archived docs in the list (BACI-68); overrides the display.show_archived setting for this call")
 	return cmd
@@ -751,9 +772,20 @@ func exportDocument(filename, explicitTo string, toPath bool) error {
 	if err := validateRelativePath(dest); err != nil {
 		return err
 	}
+	// A workspace has no working tree by design, so `doc export` — which
+	// writes a repo-relative file — has nowhere to write. Say that,
+	// rather than falling through to the phantom message below, which
+	// would tell the user to link a checkout that will never exist.
+	if err := refuseFilesystemVerbOnWorkspace(repo,
+		"`bacio doc export` writes a file into a git working tree and a workspace has none; "+
+			"use `bacio doc download` to get the bytes and pipe them wherever you want them"); err != nil {
+		return err
+	}
 	repoRoot := repo.Path
 	if repoRoot == "" {
-		return fmt.Errorf("repo path is unset; cannot resolve export destination")
+		return fmt.Errorf("repo %s has no local working tree (a sync-imported phantom); "+
+			"run `bacio repo link %s <PATH>` first, or use `bacio doc download`",
+			repo.Prefix, repo.Prefix)
 	}
 	absDest := filepath.Join(repoRoot, filepath.FromSlash(dest))
 	if opts.dryRun {

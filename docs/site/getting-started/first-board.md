@@ -127,9 +127,23 @@ Back in Claude Code:
 
 Claude calls `bacio issue list -o json --state in_review` and `bacio issue brief MYPR-…` for anything interesting, then summarises. You read the summary, not the JSON.
 
+## 7. Optional — a project that isn't a git repo
+
+Not everything you want to track produces commits. For those, create a **workspace**: a project with a 4-letter prefix, issues, documents and a Kanban board, and no folder on disk.
+
+```bash
+bacio workspace add "Home Renovation"        # → prefix HOME
+export BACIO_REPO=HOME                       # or pass --repo HOME per call
+bacio issue add "Replace the back fence"     # lands straight on the Kanban
+```
+
+Because a workspace has no working tree, `cwd` can never find it — the `--repo` selector (or `BACIO_REPO`) is how you reach it. See [Workspaces](/concepts/workspaces).
+
 ## What next
 
 - **[Your first week](/getting-started/your-first-week)** — what a real workflow feels like day-to-day.
+- **[Workspaces](/concepts/workspaces)** — track work that isn't code.
+- **[Kanban and the Agentic Pipeline](/concepts/kanban-and-pipeline)** — the two boards, and why they're separate.
 - **[Work with Claude Code](/guides/work-with-claude-code)** — prompt patterns that actually work.
 - **[Sync across machines](/guides/sync-across-machines)** — when you want the same board on a second laptop.
 - **[CLI reference](/reference/cli/)** — every command, every flag.

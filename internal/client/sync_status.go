@@ -55,7 +55,11 @@ func (c *localClient) SyncStatuses(ctx context.Context) ([]SyncStatus, error) {
 			st.LastSyncAt = src.LastSyncAt
 			st.LastError = src.LastError
 		}
-		if repo.Path != "" {
+		// Only a repo with a checkout has a .bacio/config.yaml to read.
+		// A phantom has no checkout yet; a workspace never will — it is
+		// mirrored by the whole-DB export instead, which is what the
+		// MirroredBy branch above already reported.
+		if repo.HasWorkingTree() {
 			cfg, cerr := sync.ReadProjectConfig(repo.Path)
 			if cerr == nil && cfg.Sync.Remote != "" {
 				st.Remote = cfg.Sync.Remote
@@ -228,7 +232,12 @@ func (c *localClient) SyncRegistry(ctx context.Context) (*SyncRegistry, error) {
 		}
 		entries := make([]MemberProject, 0, len(members))
 		for _, m := range members {
-			if m.Status == sync.StatusLinked || m.Status == sync.StatusPhantom {
+			// StatusWorkspace counts as accounted for the same reason
+			// linked and phantom do: the prefix is present in this sync
+			// repo's clone, so it is already surfaced under Projects and
+			// must not be double-reported in the unsynced residual.
+			// Mirrors internal/sync/registry.go's accountedPrefixes gate.
+			if m.Status == sync.StatusLinked || m.Status == sync.StatusPhantom || m.Status == sync.StatusWorkspace {
 				accountedPrefixes[m.Prefix] = true
 			}
 			entry := MemberProject{
@@ -258,7 +267,13 @@ func (c *localClient) SyncRegistry(ctx context.Context) (*SyncRegistry, error) {
 	// points at a remote the registry doesn't carry.
 	unsynced := make([]UnsyncedProject, 0)
 	for _, repo := range repos {
-		if repo.Path == "" {
+		// Pathless rows are skipped, and that covers BOTH kinds for
+		// different reasons: a phantom has nothing to set up yet, and a
+		// workspace can't drive a sync tick of its own at all — it is
+		// mirrored for free by the whole-DB export whenever any git repo
+		// ticks. "Unsynced projects" is a call to action, so listing a
+		// workspace there would offer a setup that SetupSync refuses.
+		if !repo.HasWorkingTree() {
 			continue
 		}
 		if accountedPrefixes[repo.Prefix] {

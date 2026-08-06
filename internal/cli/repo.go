@@ -15,6 +15,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/sync"
 )
 
@@ -127,7 +128,9 @@ func repoShowCmd() *cobra.Command {
 const repoRmLongHelp = `Delete a repo and everything that belongs to it.
 
 DESTRUCTIVE & IRREVERSIBLE. Cascades through every issue, comment,
-feature, document, link, relation, PR attachment, TUI setting and
+feature, document, document link, document folder, Kanban lane,
+relation, PR attachment, tag, TUI setting, repo setting, agent session,
+agent dispatch, agent channel, parked user message, notification and
 history row attached to the repo. There is no undo.
 
 Requires --confirm <prefix> (the value must equal the target prefix).
@@ -186,22 +189,9 @@ func removeRepo(prefix, confirm string) error {
 		return err
 	}
 	defer c.Close()
-	deleted, preview, err := c.DeleteRepo(context.Background(), prefix, confirm, opts.dryRun)
-	if err != nil {
-		// Confirm gate trip: format the alert and return a non-nil
-		// error so the process exits non-zero, but channel the
-		// preview through emit() (or our text alert) first so the
-		// caller sees the impact.
-		var confErr *client.RepoConfirmError
-		if errors.As(err, &confErr) {
-			return formatRepoConfirmError(confErr)
-		}
-		return err
-	}
-	if opts.dryRun {
-		return emitDryRun(toRepoDeletePreview(preview))
-	}
-	return ok("repo %s deleted (%s)", deleted.Prefix, deleted.Name)
+	// Shared with `bacio workspace rm` — same client call, same confirm
+	// gate, same dry-run projection. See deleteRepoRow in workspace.go.
+	return deleteRepoRow(c, prefix, confirm)
 }
 
 // formatRepoConfirmError renders the LLM-targeted alert. In JSON mode
@@ -232,21 +222,20 @@ func formatRepoConfirmError(e *client.RepoConfirmError) error {
 		return fmt.Errorf("aborted: %s", e.Error())
 	}
 	repo := e.Preview.Repo
-	c := e.Preview.Cascade
+	verb := "repo rm"
+	noun := "repo"
+	if repo.IsWorkspace() {
+		verb = "workspace rm"
+		noun = "workspace"
+	}
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "⚠️  STOP — DESTRUCTIVE OPERATION REQUIRES HUMAN APPROVAL")
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "`bacio repo rm %s` will permanently delete repo %s (%s) and:\n", repo.Prefix, repo.Prefix, repo.Name)
-	fmt.Fprintf(os.Stderr, "  • %d issues\n", c.Issues)
-	fmt.Fprintf(os.Stderr, "  • %d comments\n", c.Comments)
-	fmt.Fprintf(os.Stderr, "  • %d issue relations\n", c.Relations)
-	fmt.Fprintf(os.Stderr, "  • %d PR attachments\n", c.PullRequests)
-	fmt.Fprintf(os.Stderr, "  • %d tags\n", c.Tags)
-	fmt.Fprintf(os.Stderr, "  • %d features\n", c.Features)
-	fmt.Fprintf(os.Stderr, "  • %d documents\n", c.Documents)
-	fmt.Fprintf(os.Stderr, "  • %d document links\n", c.DocumentLinks)
-	fmt.Fprintf(os.Stderr, "  • %d TUI settings\n", c.TUISettings)
-	fmt.Fprintf(os.Stderr, "  • %d history rows\n", c.History)
+	fmt.Fprintf(os.Stderr, "`bacio %s %s` will permanently delete %s %s (%s) and:\n",
+		verb, repo.Prefix, noun, repo.Prefix, repo.Name)
+	for _, line := range repoCascadeBullets(e.Preview.Cascade) {
+		fmt.Fprintf(os.Stderr, "  • %s\n", line)
+	}
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "This is IRREVERSIBLE. There is no undo, no trash, no recovery.")
 	fmt.Fprintln(os.Stderr)
@@ -254,9 +243,42 @@ func formatRepoConfirmError(e *client.RepoConfirmError) error {
 	fmt.Fprintln(os.Stderr, "approval. Show this preview to the user, get a clear")
 	fmt.Fprintf(os.Stderr, "\"yes, delete %s\" in their own words, then re-run with:\n", repo.Prefix)
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "  bacio repo rm %s --confirm %s\n", repo.Prefix, repo.Prefix)
+	fmt.Fprintf(os.Stderr, "  bacio %s %s --confirm %s\n", verb, repo.Prefix, repo.Prefix)
 	fmt.Fprintln(os.Stderr)
 	return fmt.Errorf("aborted: %s", e.Error())
+}
+
+// repoCascadeBullets renders EVERY field of store.RepoCascadeCounts as a
+// "<n> <label>" line, in the struct's declaration order.
+//
+// It is a hand-written list rather than reflection so the labels read
+// like English, but it is exhaustive on purpose: the human text path
+// used to name ten of the counts while the JSON / --dry-run payload
+// marshalled the whole struct, so the loudest, most destructive surface
+// bacio has was the one under-reporting its own blast radius. Anything
+// added to RepoCascadeCounts must be added here too — the compiler will
+// not tell you, but the counts test will.
+func repoCascadeBullets(c store.RepoCascadeCounts) []string {
+	return []string{
+		fmt.Sprintf("%d issues", c.Issues),
+		fmt.Sprintf("%d comments", c.Comments),
+		fmt.Sprintf("%d issue relations", c.Relations),
+		fmt.Sprintf("%d PR attachments", c.PullRequests),
+		fmt.Sprintf("%d tags", c.Tags),
+		fmt.Sprintf("%d features", c.Features),
+		fmt.Sprintf("%d documents", c.Documents),
+		fmt.Sprintf("%d document links", c.DocumentLinks),
+		fmt.Sprintf("%d document folders", c.DocFolders),
+		fmt.Sprintf("%d Kanban lanes", c.KanbanColumns),
+		fmt.Sprintf("%d TUI settings", c.TUISettings),
+		fmt.Sprintf("%d repo settings", c.RepoSettings),
+		fmt.Sprintf("%d agent sessions", c.AgentSessions),
+		fmt.Sprintf("%d agent dispatches", c.AgentDispatches),
+		fmt.Sprintf("%d agent channels", c.AgentChannels),
+		fmt.Sprintf("%d parked user messages", c.UserMessages),
+		fmt.Sprintf("%d notifications", c.Notifications),
+		fmt.Sprintf("%d history rows", c.History),
+	}
 }
 
 // repoDeletePreview is the text/JSON shape emitted for `--dry-run`.
