@@ -9,6 +9,7 @@ function board(prefix: string): Board {
   return {
     prefix,
     name: prefix.toLowerCase(),
+    kind: 'git',
     issueCount: 0,
     syncEnabled: false,
     syncBackgroundEnabled: false,

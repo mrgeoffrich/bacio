@@ -13,7 +13,7 @@ import {
 
 describe('boardWithSync', () => {
   it('folds a present sync status into the Board badge fields', () => {
-    const b = boardWithSync('BACI', 'bacio', 12, {
+    const b = boardWithSync('BACI', 'bacio', 'git', 12, {
       prefix: 'BACI', configured: true, mirrored_by: 'bacio-sync',
       background_enabled: true, in_progress: true,
       last_sync_at: 's', last_error: 'e',
@@ -21,6 +21,7 @@ describe('boardWithSync', () => {
     expect(b).toEqual({
       prefix: 'BACI',
       name: 'bacio',
+      kind: 'git',
       issueCount: 12,
       syncEnabled: true,
       syncBackgroundEnabled: true,
@@ -34,7 +35,7 @@ describe('boardWithSync', () => {
   // BACI-376: mirrored-without-own-config is the state the badge used to
   // mislabel — it has to survive the fold intact.
   it('carries mirrored_by for a repo with no sync config of its own', () => {
-    const b = boardWithSync('OPER', 'oper', 9, {
+    const b = boardWithSync('OPER', 'oper', 'git', 9, {
       prefix: 'OPER', configured: false, mirrored_by: 'bacio-sync',
       background_enabled: true, in_progress: false,
     });
@@ -46,7 +47,7 @@ describe('boardWithSync', () => {
   // configuration — a configured repo with the ticker switched off
   // must not fold down to "enabled".
   it('keeps the global background toggle distinct from per-repo config', () => {
-    const b = boardWithSync('BACI', 'bacio', 1, {
+    const b = boardWithSync('BACI', 'bacio', 'git', 1, {
       prefix: 'BACI', configured: true, background_enabled: false, in_progress: false,
     });
     expect(b.syncEnabled).toBe(true);
@@ -54,12 +55,20 @@ describe('boardWithSync', () => {
   });
 
   it('defaults the badges off when sync status is undefined', () => {
-    const b = boardWithSync('X', 'x', 0, undefined);
+    const b = boardWithSync('X', 'x', 'git', 0, undefined);
     expect(b.syncEnabled).toBe(false);
     expect(b.syncBackgroundEnabled).toBe(false);
     expect(b.syncMirroredBy).toBeUndefined();
     expect(b.syncInProgress).toBe(false);
     expect(b.syncLastAt).toBeUndefined();
+  });
+
+  // The pivot: the fold is also where the wire's free-form `kind` string
+  // gets narrowed onto the contract's union, so every Board the HTTP
+  // transport builds carries a real discriminator.
+  it('narrows the wire kind onto the contract union', () => {
+    expect(boardWithSync('WKSP', 'wksp', 'workspace', 0, undefined).kind).toBe('workspace');
+    expect(boardWithSync('LEGA', 'lega', '', 0, undefined).kind).toBe('git');
   });
 });
 

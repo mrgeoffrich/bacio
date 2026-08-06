@@ -13,6 +13,7 @@ export * from './api/pipeline.http';
 export * from './api/agents.http';
 export * from './api/notifications.http';
 export * from './api/docs.http';
+export * from './api/kanban.http';
 export * from './api/monitor.http';
 export * from './api/settings.http';
 export * from './api/sync.http';
@@ -69,6 +70,12 @@ export type {
   DocSummaryLink,
   DocSummary,
   DocContent,
+  DocFolder,
+  DocFolderDeletePreview,
+  KanbanCardRef,
+  KanbanColumn,
+  KanbanColumnDeletePreview,
+  RepoKind,
   FeatureSummary,
   FeatureLinkedIssue,
   FeatureCommentDTO,

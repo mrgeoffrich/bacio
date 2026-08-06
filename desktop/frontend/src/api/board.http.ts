@@ -17,7 +17,7 @@ export async function listBoards(): Promise<Board[]> {
   // an issue count and the BACI-89 background-sync status. Issue count
   // comes from a per-repo issue-list query; sync status comes from
   // GET /sync (one call, every repo) — no longer hardcoded false.
-  const repos = await call<Array<{ prefix: string; name: string }>>('/repos');
+  const repos = await call<Array<{ prefix: string; name: string; kind: string }>>('/repos');
   // Sync status is badge polish — a failure here must not break the
   // board picker, so fall back to an empty map.
   let syncByPrefix = new Map<string, SyncStatusApi>();
@@ -30,7 +30,7 @@ export async function listBoards(): Promise<Board[]> {
   const boards: Board[] = [];
   for (const r of repos) {
     const issues = await call<ApiIssue[]>(`/repos/${r.prefix}/issues`);
-    boards.push(boardWithSync(r.prefix, r.name, issues.length, syncByPrefix.get(r.prefix)));
+    boards.push(boardWithSync(r.prefix, r.name, r.kind, issues.length, syncByPrefix.get(r.prefix)));
   }
   return boards;
 }
@@ -87,7 +87,25 @@ export async function addRepository(payload?: AddRepositoryPayload): Promise<Boa
   // freshly-added repo almost never has sync configured yet — the
   // zero SyncStatusApi gives syncEnabled=false. The next listBoards
   // refresh picks up real sync status from GET /sync.
-  return boardWithSync(repo.prefix, repo.name, 0, undefined);
+  return boardWithSync(repo.prefix, repo.name, repo.kind, 0, undefined);
+}
+
+// addWorkspace registers a manual workspace — a pathless, git-less repo row
+// (kind='workspace'). POSTs to the dedicated /workspaces route rather than
+// /repos: registering a git repo takes a path and refuses without one,
+// while a workspace takes neither. (POST /repos does accept
+// {"kind":"workspace"} and funnels into the same server-side body, but the
+// dedicated route is the one whose request shape matches this call.)
+//
+// prefix is optional; omit it (or pass '') to allocate one from the name
+// through the same machinery a git registration uses.
+export async function addWorkspace(name: string, prefix?: string): Promise<Board> {
+  const body: Record<string, string> = { name };
+  if (prefix) body.prefix = prefix.toUpperCase();
+  const repo = await call<ApiRepo>('/workspaces', { method: 'POST', body });
+  // Same zero-state reasoning as addRepository: a brand-new workspace has
+  // no issues and no sync config of its own.
+  return boardWithSync(repo.prefix, repo.name, repo.kind, 0, undefined);
 }
 
 // ApiProxyFQDNStat is the snake_case wire shape GET /proxy/stats returns
