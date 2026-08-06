@@ -22,13 +22,18 @@ type ExportResult struct {
 	// Comments counts issue-scoped comments written. Kept semantically
 	// issue-only so pinned-output tests stay green; the BACI-124
 	// feature-scoped comments roll up into FeatureComments below.
-	Comments        int    `json:"comments"`
-	FeatureComments int    `json:"feature_comments"`
-	Documents       int    `json:"documents"`
-	Files           int    `json:"files"`
-	BytesWritten    int64  `json:"bytes_written"`
-	Target          string `json:"target"`
-	DryRun          bool   `json:"dry_run,omitempty"`
+	Comments        int `json:"comments"`
+	FeatureComments int `json:"feature_comments"`
+	Documents       int `json:"documents"`
+	// DocFolders / KanbanColumns count the two container record kinds
+	// introduced by the workspaces + Kanban pivot. omitempty so a sync
+	// repo with neither keeps the pre-pivot JSON shape byte-for-byte.
+	DocFolders    int    `json:"doc_folders,omitempty"`
+	KanbanColumns int    `json:"kanban_columns,omitempty"`
+	Files         int    `json:"files"`
+	BytesWritten  int64  `json:"bytes_written"`
+	Target        string `json:"target"`
+	DryRun        bool   `json:"dry_run,omitempty"`
 
 	// Index carries the per-repo summaries used to render the
 	// top-level index.yaml. Populated as each repo finishes exporting
@@ -194,6 +199,31 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 		}
 		res.Documents++
 	}
+
+	// Container records: the workspace sentinel, the doc-folder tree and
+	// the Kanban lanes. All three land at NEW sibling paths under
+	// repos/<PREFIX>/ — never as a new key in repo.yaml / issue.yaml /
+	// doc.yaml — so an older bacio neither reads, rewrites nor deletes
+	// them. See the A0 rule in paths.go.
+	//
+	// Exported last so the `docs` and `issues` slices above are in hand:
+	// membership lives on the container side, so folder.yaml needs the
+	// document rows and column.yaml needs the issue rows.
+	if repo.IsWorkspace() {
+		if err := e.exportWorkspaceSentinel(w, repo); err != nil {
+			return fmt.Errorf("workspace sentinel: %w", err)
+		}
+	}
+	nFolders, err := e.exportDocFolders(w, repo, docs)
+	if err != nil {
+		return fmt.Errorf("doc folders: %w", err)
+	}
+	res.DocFolders += nFolders
+	nColumns, err := e.exportKanbanColumns(w, repo, issues)
+	if err != nil {
+		return fmt.Errorf("kanban columns: %w", err)
+	}
+	res.KanbanColumns += nColumns
 
 	res.Index = append(res.Index, RepoIndexEntry{
 		Prefix:          repo.Prefix,
@@ -480,6 +510,176 @@ func (e *Engine) exportDocument(
 		return err
 	}
 	return w.writeRaw(yamlPath, yamlBytes)
+}
+
+// exportWorkspaceSentinel writes repos/<PREFIX>/workspace.yaml. Its
+// PRESENCE is the whole signal — a prefix with this file is a
+// workspace, a prefix without it is a git repo. repo.yaml is left
+// byte-identical to what an older binary writes (A0), which is why the
+// discriminator lives in a sibling rather than as a `kind:` key.
+//
+// The body carries the repo's own uuid + timestamps so the file is
+// byte-stable across exports and cross-checkable against repo.yaml.
+func (e *Engine) exportWorkspaceSentinel(w *exportWriter, repo *model.Repo) error {
+	return w.writeYAML(WorkspaceYAMLFile(repo.Prefix), Map(
+		Pair{"created_at", Time(repo.CreatedAt)},
+		Pair{"kind", Str(string(model.RepoKindWorkspace))},
+		Pair{"updated_at", Time(repo.UpdatedAt)},
+		Pair{"uuid", Str(repo.UUID)},
+	))
+}
+
+// exportDocFolders writes one repos/<PREFIX>/folders/<uuid>/folder.yaml
+// per doc folder, carrying the folder's own fields plus the ordered
+// sequence of document uuids it contains.
+//
+// `docs` is the repo's document list as already fetched by exportRepo
+// (lean rows — no content — but they carry uuid / folder_id /
+// folder_position). Membership is derived here rather than written into
+// doc.yaml because a new key in doc.yaml would hard-fail an older
+// binary's sync. Returns the number of folder records written.
+func (e *Engine) exportDocFolders(w *exportWriter, repo *model.Repo, docs []*model.Document) (int, error) {
+	folders, err := e.Store.ListDocFolders(repo.ID)
+	if err != nil {
+		return 0, fmt.Errorf("list doc folders: %w", err)
+	}
+	if len(folders) == 0 {
+		return 0, nil
+	}
+	uuidByID := make(map[int64]string, len(folders))
+	for _, f := range folders {
+		uuidByID[f.ID] = f.UUID
+	}
+
+	// Group documents by folder. Sort by (folder_position, filename) —
+	// the same order store.ListDocuments applies, so the on-disk
+	// sequence is exactly what the UI renders. Doc-folder positions are
+	// a sort key rather than a dense index (2B), so the filename
+	// tie-break is load-bearing for the all-zero pre-pivot case.
+	type docRef struct {
+		position int
+		filename string
+		uuid     string
+	}
+	byFolder := make(map[int64][]docRef, len(folders))
+	for _, d := range docs {
+		if d.FolderID == nil {
+			continue
+		}
+		byFolder[*d.FolderID] = append(byFolder[*d.FolderID], docRef{
+			position: d.FolderPosition,
+			filename: d.Filename,
+			uuid:     d.UUID,
+		})
+	}
+	for id := range byFolder {
+		refs := byFolder[id]
+		sort.Slice(refs, func(i, j int) bool {
+			if refs[i].position != refs[j].position {
+				return refs[i].position < refs[j].position
+			}
+			return refs[i].filename < refs[j].filename
+		})
+		byFolder[id] = refs
+	}
+
+	written := 0
+	for _, f := range folders {
+		parentUUID := ""
+		if f.ParentID != nil {
+			// A parent outside this repo is impossible (the FK plus the
+			// repo-scoped list), but a missing lookup would silently
+			// re-root the folder, so drop the reference rather than
+			// emitting a dangling one.
+			parentUUID = uuidByID[*f.ParentID]
+		}
+		items := make([]Node, 0, len(byFolder[f.ID]))
+		for _, ref := range byFolder[f.ID] {
+			items = append(items, Str(ref.uuid))
+		}
+		folderPath := DocFolderFolder(repo.Prefix, f.UUID)
+		if err := w.writeYAML(DocFolderYAMLFile(folderPath), Map(
+			Pair{"created_at", Time(f.CreatedAt)},
+			Pair{"documents", Seq(items...)},
+			Pair{"name", Str(f.Name)},
+			Pair{"parent_uuid", Str(parentUUID)},
+			Pair{"position", Int(int64(f.Position))},
+			Pair{"updated_at", Time(f.UpdatedAt)},
+			Pair{"uuid", Str(f.UUID)},
+		)); err != nil {
+			return written, err
+		}
+		written++
+	}
+	return written, nil
+}
+
+// exportKanbanColumns writes one
+// repos/<PREFIX>/kanban/<uuid>/column.yaml per lane, carrying the
+// lane's own fields plus the ordered sequence of issue uuids on it.
+//
+// Same container-side membership rule as exportDocFolders: nothing
+// about board placement serialises into issue.yaml. Returns the number
+// of column records written.
+func (e *Engine) exportKanbanColumns(w *exportWriter, repo *model.Repo, issues []*model.Issue) (int, error) {
+	columns, err := e.Store.ListKanbanColumns(repo.ID)
+	if err != nil {
+		return 0, fmt.Errorf("list kanban columns: %w", err)
+	}
+	if len(columns) == 0 {
+		return 0, nil
+	}
+
+	// Kanban positions ARE dense 0-based indices (2C), unlike doc-folder
+	// positions; the issue number tie-break only matters for a DB left
+	// non-dense by a hand-edit or an older binary.
+	type cardRef struct {
+		position int
+		number   int64
+		uuid     string
+	}
+	byColumn := make(map[int64][]cardRef, len(columns))
+	for _, iss := range issues {
+		if iss.KanbanColumnID == nil {
+			continue
+		}
+		byColumn[*iss.KanbanColumnID] = append(byColumn[*iss.KanbanColumnID], cardRef{
+			position: iss.KanbanPosition,
+			number:   iss.Number,
+			uuid:     iss.UUID,
+		})
+	}
+	for id := range byColumn {
+		refs := byColumn[id]
+		sort.Slice(refs, func(i, j int) bool {
+			if refs[i].position != refs[j].position {
+				return refs[i].position < refs[j].position
+			}
+			return refs[i].number < refs[j].number
+		})
+		byColumn[id] = refs
+	}
+
+	written := 0
+	for _, c := range columns {
+		items := make([]Node, 0, len(byColumn[c.ID]))
+		for _, ref := range byColumn[c.ID] {
+			items = append(items, Str(ref.uuid))
+		}
+		colPath := KanbanColumnFolder(repo.Prefix, c.UUID)
+		if err := w.writeYAML(KanbanColumnYAMLFile(colPath), Map(
+			Pair{"created_at", Time(c.CreatedAt)},
+			Pair{"issues", Seq(items...)},
+			Pair{"name", Str(c.Name)},
+			Pair{"position", Int(int64(c.Position))},
+			Pair{"updated_at", Time(c.UpdatedAt)},
+			Pair{"uuid", Str(c.UUID)},
+		)); err != nil {
+			return written, err
+		}
+		written++
+	}
+	return written, nil
 }
 
 // buildRepoYAML produces the canonical repo.yaml node for one repo.

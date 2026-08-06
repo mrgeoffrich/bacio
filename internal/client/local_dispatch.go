@@ -52,6 +52,9 @@ func (c *localClient) resolveBaseBranchForIssue(iss *model.Issue) string {
 }
 
 func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error) {
+	if err := refuseDispatchOnWorkspace(repo); err != nil {
+		return nil, err
+	}
 	if in.TargetAgent == "" && in.TargetSession == "" {
 		return nil, fmt.Errorf("dispatch requires a target — pass --to <agent> and/or --session <id>")
 	}
@@ -171,6 +174,9 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("AutoDispatchIssue requires a repo")
+	}
+	if err := refuseDispatchOnWorkspace(repo); err != nil {
+		return nil, err
 	}
 	parsedMode, err := model.ParseDispatchMode(mode)
 	if err != nil {

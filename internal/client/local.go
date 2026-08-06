@@ -118,11 +118,18 @@ func (c *localClient) EnsureRepo(ctx context.Context, info *git.Info) (*model.Re
 	// matching project for this working tree (sync brought the
 	// metadata in earlier). Upgrade rather than create a duplicate.
 	// Mirrors the CLI's resolveRepo behaviour for the same reason.
+	//
+	// IsPhantom() rather than `Path == ""`: a workspace is also pathless,
+	// and binding this working tree to one would silently turn a
+	// bacio-only container into a git repo. In practice a workspace's
+	// remote_url is always '' and the outer guard already skips that
+	// case, but the predicate makes the intent explicit rather than
+	// leaving the invariant load-bearing three lines away.
 	if info.RemoteURL != "" {
 		repos, lerr := c.store.ListRepos()
 		if lerr == nil {
 			for _, r := range repos {
-				if r.Path == "" && r.RemoteURL == info.RemoteURL {
+				if r.IsPhantom() && r.RemoteURL == info.RemoteURL {
 					if err := c.store.UpgradePhantomRepo(r.UUID, info.Root); err != nil {
 						return nil, false, fmt.Errorf("upgrade phantom %s: %w", r.Prefix, err)
 					}

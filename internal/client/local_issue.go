@@ -424,6 +424,17 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 			b := cleanBase
 			projected.BaseBranch = &b
 		}
+		// Mirror the workspace board default below so a rehearsal shows
+		// the lane the real call would drop the card into.
+		if repo.IsWorkspace() {
+			lanes, lerr := c.store.ListKanbanColumns(repo.ID)
+			if lerr != nil {
+				return nil, lerr
+			}
+			if len(lanes) > 0 {
+				projected.KanbanColumnID = &lanes[0].ID
+			}
+		}
 		return projected, nil
 	}
 	iss, err := c.store.CreateIssue(repo.ID, featureID, in.Title, in.Description, state, cleanTags, cleanBase, cleanImpact)
@@ -436,6 +447,25 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 		TargetID: &iss.ID, TargetLabel: iss.Key,
 		Details: iss.Title,
 	})
+	// In a WORKSPACE every new card lands on the Kanban; in a git repo it
+	// stays off the board (kanban_column_id NULL) and lives on the
+	// Agentic Pipeline Backlog until someone opts it in. That is what
+	// stops the two surfaces double-rendering the same `todo` card.
+	//
+	// The store deliberately does NOT do this — store.CreateIssue leaves
+	// the column NULL for every repo kind so the issue writer isn't
+	// coupled to the repo-kind axis — so the default belongs here, on the
+	// create path all four surfaces funnel through.
+	if repo.IsWorkspace() {
+		if err := c.placeOnFirstKanbanLane(repo, iss); err != nil {
+			return nil, err
+		}
+		// Re-read so the caller sees the placed card. Cheap, and the
+		// composers render the returned issue.
+		if placed, rerr := c.store.GetIssueByID(iss.ID); rerr == nil {
+			iss = placed
+		}
+	}
 	if autoRun {
 		if err := c.store.ArmIssuePipeline(iss.ID, autoProc); err != nil {
 			return nil, err

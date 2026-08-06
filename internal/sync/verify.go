@@ -873,7 +873,11 @@ func checkCaseCollisions(syncRepoRoot string, scan *verifyScanResult) []VerifyIs
 		// path level, but their case-collision concerns are kind
 		// local (no human writes both `feature/foo` and `docs/Foo`
 		// expecting them to collide).
-		for _, sub := range []string{"features", "issues", "docs"} {
+		// The two container subdirs join the list even though their
+		// folder segments are uuids (which can't case-collide in
+		// practice): a hand-created or hand-renamed directory still
+		// gets the same scrutiny as every other record kind.
+		for _, sub := range []string{"features", "issues", "docs", DocFoldersSubdir, KanbanColumnsSubdir} {
 			dir := filepath.Join(syncRepoRoot, "repos", prefix, sub)
 			entries, err := os.ReadDir(dir)
 			if err != nil {

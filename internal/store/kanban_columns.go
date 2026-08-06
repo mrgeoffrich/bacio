@@ -85,6 +85,57 @@ func (s *Store) CreateKanbanColumn(repoID int64, name string) (*model.KanbanColu
 	return s.GetKanbanColumnByID(id)
 }
 
+// CreateKanbanColumnFromSync inserts a lane with a caller-supplied
+// uuid, position and timestamps, for the sync import path. Mirrors
+// CreateFeatureFromSync / CreateDocFolderFromSync: same name
+// validation, no auto-uuid, no auto-position.
+//
+// The position is written verbatim rather than appended at MAX+1: lane
+// order is synced content, and the peer that authored the column.yaml
+// already holds the authoritative dense 0..n-1 sequence. Re-deriving it
+// here would fight the incoming data.
+func (s *Store) CreateKanbanColumnFromSync(repoID int64, uuid, name string, position int, createdAt, updatedAt sql.NullTime) (*model.KanbanColumn, error) {
+	if uuid == "" {
+		return nil, fmt.Errorf("CreateKanbanColumnFromSync: uuid is required")
+	}
+	clean, err := ValidateKanbanColumnName(name)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if err := assertKanbanNameFreeTx(tx, repoID, clean, 0); err != nil {
+		return nil, err
+	}
+	q := `INSERT INTO kanban_columns (uuid, repo_id, name, position`
+	vals := `?, ?, ?, ?`
+	args := []any{uuid, repoID, clean, position}
+	if createdAt.Valid {
+		q += `, created_at`
+		vals += `, ?`
+		args = append(args, createdAt.Time)
+	}
+	if updatedAt.Valid {
+		q += `, updated_at`
+		vals += `, ?`
+		args = append(args, updatedAt.Time)
+	}
+	q += `) VALUES (` + vals + `)`
+	res, err := tx.Exec(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetKanbanColumnByID(id)
+}
+
 func (s *Store) GetKanbanColumnByID(id int64) (*model.KanbanColumn, error) {
 	return scanKanbanColumn(s.DB.QueryRow(`SELECT `+kanbanColumnCols+` FROM kanban_columns WHERE id = ?`, id))
 }
@@ -262,6 +313,28 @@ func (s *Store) DeleteKanbanColumn(id int64) error {
 		return err
 	}
 	return commitKanbanOrderTx(tx, remaining)
+}
+
+// DeleteKanbanColumnByUUID is the sync-side delete: a lane whose
+// column.yaml disappeared from the sync repo is gone everywhere.
+// Resolves the uuid to a row and defers to DeleteKanbanColumn, so the
+// cards come off the board (kanban_column_id NULL, kanban_position
+// reset) and the remaining lanes renumber densely — exactly as a local
+// delete would. Mirrors DeleteDocFolderByUUID.
+//
+// Returns ErrNotFound when no lane carries that uuid.
+func (s *Store) DeleteKanbanColumnByUUID(uuid string) error {
+	if uuid == "" {
+		return fmt.Errorf("DeleteKanbanColumnByUUID: uuid is required")
+	}
+	var id int64
+	if err := s.DB.QueryRow(`SELECT id FROM kanban_columns WHERE uuid = ?`, uuid).Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return s.DeleteKanbanColumn(id)
 }
 
 // BootstrapKanbanColumns seeds a repo's starter board —

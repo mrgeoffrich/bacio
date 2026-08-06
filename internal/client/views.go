@@ -205,3 +205,38 @@ type DocumentUnlinkPreview struct {
 	Target      string `json:"target"`
 	WouldRemove int    `json:"would_remove"`
 }
+
+// DocFolderCascadeCount is the blast radius of deleting a doc folder.
+// Subfolders is the number of DESCENDANT folders that go with it
+// (doc_folders.parent_id is ON DELETE CASCADE). DocumentsReRooted is the
+// number of documents in that whole subtree that get moved back to the
+// tree root — documents.folder_id is ON DELETE SET NULL, so a folder
+// delete never destroys a page.
+type DocFolderCascadeCount struct {
+	Subfolders        int `json:"subfolders"`
+	DocumentsReRooted int `json:"documents_re_rooted"`
+}
+
+// DocFolderDeletePreview is the `--dry-run` / confirmation payload for a
+// folder delete. Mirrors DocumentDeletePreview's shape.
+type DocFolderDeletePreview struct {
+	Folder      *model.DocFolder      `json:"folder"`
+	Path        string                `json:"path"`
+	Cascade     DocFolderCascadeCount `json:"cascade"`
+	WouldDelete bool                  `json:"would_delete"`
+}
+
+// KanbanColumnCascadeCount is the blast radius of deleting a Kanban
+// lane: the cards it holds come OFF the board (kanban_column_id back to
+// NULL). The issues themselves are never deleted.
+type KanbanColumnCascadeCount struct {
+	IssuesRemovedFromBoard int `json:"issues_removed_from_board"`
+}
+
+// KanbanColumnDeletePreview is the `--dry-run` / confirmation payload
+// for a lane delete.
+type KanbanColumnDeletePreview struct {
+	Column      *model.KanbanColumn      `json:"column"`
+	Cascade     KanbanColumnCascadeCount `json:"cascade"`
+	WouldDelete bool                     `json:"would_delete"`
+}

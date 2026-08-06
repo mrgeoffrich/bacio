@@ -90,10 +90,17 @@ func (s *Store) CreateRepo(prefix, name, path, remoteURL string) (*model.Repo, e
 // uniqueness is one namespace shared with git repos, enforced by the
 // UNIQUE on repos.prefix.
 //
-// Callers that want the mandatory catch-all features / repo default
-// call BootstrapRepoDefaults(id) afterwards, exactly as the git
-// registration path does — this function stays a single INSERT so the
-// sync importer can use it without dragging bootstrap side effects in.
+// Unlike CreateRepo this DOES bootstrap, because nothing else ever
+// will: a git repo is re-resolved from its cwd on every command and
+// bootstrapped there, but a workspace has no cwd to be found from, so
+// an un-bootstrapped one would open with no Kanban board and no
+// catch-all features, permanently. BootstrapRepoDefaults is idempotent,
+// so a caller that also bootstraps is harmless.
+//
+// The sync importer must NOT use this — it needs to preserve the uuid
+// from repo.yaml and must not mint a new one, and it runs inside a
+// single *sql.Tx that this function's nested writes would deadlock
+// against. It uses InsertPhantomRepoTx instead.
 func (s *Store) CreateWorkspace(prefix, name string) (*model.Repo, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -183,6 +190,82 @@ func (s *Store) CreatePhantomRepo(uuid, prefix, name, remoteURL string) (*model.
 		return nil, fmt.Errorf("CreatePhantomRepo: uuid and prefix are required")
 	}
 	return s.insertRepo(uuid, prefix, name, model.RepoKindGit, "", remoteURL)
+}
+
+// CreatePhantomWorkspace is CreatePhantomRepo's workspace twin: a
+// uuid-preserving insert for a synced prefix that the sync repo marks
+// as a workspace (a repos/<PREFIX>/workspace.yaml sentinel sits beside
+// its repo.yaml).
+//
+// Neither existing constructor fits. CreateWorkspace mints its own
+// UUIDv7, which would fork the identity the sync repo already carries;
+// CreatePhantomRepo is hard-wired to kind='git' precisely so a
+// workspace can't sneak in through it.
+//
+// Deliberately does NOT call BootstrapRepoDefaults. An imported prefix
+// gets its features and Kanban lanes from the sync repo itself, and
+// seeding a local default set on top would immediately collide with the
+// incoming records (see the sync importer's name-collision handling).
+// That is the same stance CreatePhantomRepo takes.
+func (s *Store) CreatePhantomWorkspace(uuid, prefix, name string) (*model.Repo, error) {
+	if uuid == "" || prefix == "" {
+		return nil, fmt.Errorf("CreatePhantomWorkspace: uuid and prefix are required")
+	}
+	return s.insertRepo(uuid, prefix, name, model.RepoKindWorkspace, "", "")
+}
+
+// InsertPhantomRepoTx is the transaction-aware insert the sync importer
+// uses, mirroring MarkSyncedTx's precedent: the importer runs its whole
+// pass inside one *sql.Tx, so it cannot call the *sql.DB-based
+// constructors above — a second pooled connection would block on the
+// open write transaction until busy_timeout expired and then fail.
+//
+// It exists so the importer stops writing `INSERT INTO repos` by hand.
+// The (kind, path) invariant is structural here: there is no path
+// parameter at all. An imported prefix never has a local working tree
+// — a git prefix lands as a phantom and is upgraded later by
+// UpgradePhantomRepo when the user runs bacio inside the matching
+// checkout, and a workspace is permanently pathless — so hard-wiring
+// path to '' is both correct and unbreakable by a caller.
+//
+// createdAt / updatedAt are pre-formatted SQLite timestamp strings
+// (the importer copies them verbatim from repo.yaml so a round-trip
+// preserves history); pass "" to fall back to the column defaults.
+func InsertPhantomRepoTx(
+	tx *sql.Tx,
+	uuid, prefix, name string,
+	kind model.RepoKind,
+	remoteURL string,
+	nextIssueNumber int64,
+	createdAt, updatedAt string,
+) error {
+	if tx == nil {
+		return fmt.Errorf("InsertPhantomRepoTx: tx is required")
+	}
+	if uuid == "" || prefix == "" {
+		return fmt.Errorf("InsertPhantomRepoTx: uuid and prefix are required")
+	}
+	if kind == "" {
+		kind = model.RepoKindGit
+	}
+	if err := validateRepoKindPath(kind, ""); err != nil {
+		return err
+	}
+	cols := `uuid, prefix, name, kind, path, remote_url, next_issue_number`
+	vals := `?, ?, ?, ?, '', ?, ?`
+	args := []any{uuid, prefix, name, string(kind), remoteURL, nextIssueNumber}
+	if createdAt != "" {
+		cols += `, created_at`
+		vals += `, ?`
+		args = append(args, createdAt)
+	}
+	if updatedAt != "" {
+		cols += `, updated_at`
+		vals += `, ?`
+		args = append(args, updatedAt)
+	}
+	_, err := tx.Exec(`INSERT INTO repos (`+cols+`) VALUES (`+vals+`)`, args...)
+	return err
 }
 
 // UpgradePhantomRepo populates `path` on a phantom row, turning it

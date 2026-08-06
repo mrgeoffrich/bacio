@@ -133,6 +133,91 @@ func RepoYAMLFile(prefix string) string {
 	return path.Join("repos", prefix, "repo.yaml")
 }
 
+// ---------------------------------------------------------------------
+// Pivot container records — workspaces, doc folders, kanban lanes
+// ---------------------------------------------------------------------
+//
+// THE A0 RULE. Everything below lands at a NEW sibling path under
+// repos/<PREFIX>/ and NEVER as a new key in repo.yaml / issue.yaml /
+// doc.yaml, and NEVER as a new file inside an existing record folder.
+// Two mechanisms make that non-negotiable:
+//
+//   - Every record manifest is parsed with KnownFields(true)
+//     (strictDecode, yaml_parse.go). A new key in an existing manifest
+//     makes an OLDER bacio hard-fail its entire `bacio sync` run, and
+//     its next export silently strips the key back out (ExportStaged
+//     diffs staging-vs-target byte-wise).
+//   - recordFolderOf (export_staging.go) resolves a stale file to the
+//     record folder an export should os.RemoveAll. A new file inside
+//     repos/<P>/docs/<filename>/ would make an older binary delete the
+//     whole document folder, after which propagateDeletes drops the doc
+//     from the DB on every machine — silent, cross-machine data loss.
+//
+// The three shapes below are all invisible to an older binary:
+//
+//	repos/<P>/workspace.yaml               3 segments  -> recordFolderOf ""
+//	repos/<P>/folders/<uuid>/folder.yaml   parts[2]="folders" -> not in the switch -> ""
+//	repos/<P>/kanban/<uuid>/column.yaml    parts[2]="kanban"  -> not in the switch -> ""
+//
+// and an older binary's scanners only ever read repo.yaml plus the
+// features/ issues/ docs/ subdirs, so the new siblings are never read,
+// rewritten or deleted by it. Pinned by TestOldBinaryNeverDeletesPivotPaths.
+//
+// The folder segment for both container kinds is the record's UUID, not
+// a human label. A label would be renameable, which would need rename
+// detection, redirects, and case-collision handling; the uuid is
+// immutable so the path is a pure function of identity and a rename is
+// a pure content change.
+const (
+	// WorkspaceSentinelName is the file whose PRESENCE at
+	// repos/<PREFIX>/workspace.yaml means "this prefix is a workspace,
+	// not a git repo". repo.yaml deliberately does NOT learn a `kind`
+	// key — see the A0 rule above.
+	WorkspaceSentinelName = "workspace.yaml"
+	// DocFoldersSubdir is the per-repo subdir holding doc-folder records.
+	DocFoldersSubdir = "folders"
+	// DocFolderManifestName is the manifest inside one doc-folder record.
+	DocFolderManifestName = "folder.yaml"
+	// KanbanColumnsSubdir is the per-repo subdir holding kanban-lane records.
+	KanbanColumnsSubdir = "kanban"
+	// KanbanColumnManifestName is the manifest inside one kanban-lane record.
+	KanbanColumnManifestName = "column.yaml"
+)
+
+// WorkspaceYAMLFile returns the workspace sentinel path for a prefix,
+// e.g. "repos/MINI/workspace.yaml". Three path segments, so
+// recordFolderOf returns "" for it and no binary — old or new — ever
+// plans a delete against it. That matches repo.yaml's treatment
+// exactly: a repo folder is never removed by the export diff.
+func WorkspaceYAMLFile(prefix string) string {
+	prefix = strings.ToUpper(strings.TrimSpace(prefix))
+	return path.Join("repos", prefix, WorkspaceSentinelName)
+}
+
+// DocFolderFolder returns the record folder for one doc folder, e.g.
+// "repos/MINI/folders/0191f0d2-....". The segment is the folder's uuid.
+func DocFolderFolder(prefix, uuid string) string {
+	prefix = strings.ToUpper(strings.TrimSpace(prefix))
+	return path.Join("repos", prefix, DocFoldersSubdir, NormalizeNFC(uuid))
+}
+
+// DocFolderYAMLFile is the folder.yaml inside a doc-folder record folder.
+func DocFolderYAMLFile(folder string) string {
+	return path.Join(folder, DocFolderManifestName)
+}
+
+// KanbanColumnFolder returns the record folder for one kanban lane,
+// e.g. "repos/MINI/kanban/0191f0d2-....". The segment is the column's uuid.
+func KanbanColumnFolder(prefix, uuid string) string {
+	prefix = strings.ToUpper(strings.TrimSpace(prefix))
+	return path.Join("repos", prefix, KanbanColumnsSubdir, NormalizeNFC(uuid))
+}
+
+// KanbanColumnYAMLFile is the column.yaml inside a kanban record folder.
+func KanbanColumnYAMLFile(folder string) string {
+	return path.Join(folder, KanbanColumnManifestName)
+}
+
 // RepoFolder is the per-repo folder under the sync repo root.
 func RepoFolder(prefix string) string {
 	prefix = strings.ToUpper(strings.TrimSpace(prefix))

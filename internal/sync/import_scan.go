@@ -23,6 +23,8 @@ func (e *Engine) scanWorkingTree(ctx context.Context, source string) (*scanResul
 			store.SyncKindComment:        {},
 			store.SyncKindFeatureComment: {},
 			store.SyncKindRepo:           {},
+			store.SyncKindDocFolder:      {},
+			store.SyncKindKanbanColumn:   {},
 		},
 	}
 	reposRoot := filepath.Join(source, "repos")
@@ -80,14 +82,25 @@ func (e *Engine) scanRepoFolder(source, prefix string, scan *scanResult) (*scann
 	}
 
 	sr := &scannedRepo{
-		Prefix:    parsedRepo.Prefix,
-		Parsed:    parsedRepo,
-		Folder:    folder,
-		Redirects: redirects,
-		Features:  make(map[string]*scannedFeature),
-		Issues:    make(map[string]*scannedIssue),
-		Documents: make(map[string]*scannedDocument),
+		Prefix:        parsedRepo.Prefix,
+		Parsed:        parsedRepo,
+		Folder:        folder,
+		Redirects:     redirects,
+		Features:      make(map[string]*scannedFeature),
+		Issues:        make(map[string]*scannedIssue),
+		Documents:     make(map[string]*scannedDocument),
+		DocFolders:    make(map[string]*scannedDocFolder),
+		KanbanColumns: make(map[string]*scannedKanbanColumn),
 	}
+
+	// Workspace sentinel. Presence marks the prefix as a workspace; a
+	// missing file is the overwhelmingly common case (every git repo)
+	// and is not an error.
+	workspace, err := scanWorkspaceSentinel(source, prefix)
+	if err != nil {
+		return nil, err
+	}
+	sr.Workspace = workspace
 
 	// Features.
 	if err := e.scanFeatures(source, prefix, sr, scan); err != nil {
@@ -101,7 +114,33 @@ func (e *Engine) scanRepoFolder(source, prefix string, scan *scanResult) (*scann
 	if err := e.scanDocuments(source, prefix, sr, scan); err != nil {
 		return nil, err
 	}
+	// Container records (doc folders, kanban lanes). Sibling subdirs of
+	// features/ issues/ docs/ — invisible to an older binary.
+	if err := e.scanDocFolders(source, prefix, sr, scan); err != nil {
+		return nil, err
+	}
+	if err := e.scanKanbanColumns(source, prefix, sr, scan); err != nil {
+		return nil, err
+	}
 	return sr, nil
+}
+
+// scanWorkspaceSentinel reads repos/<prefix>/workspace.yaml if present.
+// Returns (nil, nil) when the file is absent — that is the normal shape
+// for a git-backed prefix, not an error.
+func scanWorkspaceSentinel(source, prefix string) (*ParsedWorkspace, error) {
+	b, err := os.ReadFile(filepath.Join(source, filepath.FromSlash(WorkspaceYAMLFile(prefix))))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read workspace.yaml: %w", err)
+	}
+	parsed, err := ParseWorkspaceYAML(b)
+	if err != nil {
+		return nil, err
+	}
+	return parsed, nil
 }
 
 func (e *Engine) scanFeatures(source, prefix string, sr *scannedRepo, scan *scanResult) error {
@@ -306,6 +345,85 @@ func (e *Engine) scanDocuments(source, prefix string, sr *scannedRepo, scan *sca
 			ContentHash: ContentHash(body),
 		}
 		scan.seenUUIDs[store.SyncKindDocument][parsed.UUID] = struct{}{}
+	}
+	return nil
+}
+
+// scanDocFolders walks repos/<prefix>/folders/<uuid>/folder.yaml.
+// Mirrors scanDocuments: a missing subdir is fine (every pre-pivot sync
+// repo), a directory without its manifest is skipped, and a manifest
+// that fails to parse aborts the import loudly.
+//
+// The folder segment is the record's uuid, but the YAML is
+// authoritative — a hand-renamed directory still imports under the uuid
+// its manifest declares, and the next export writes it back at the
+// canonical path.
+func (e *Engine) scanDocFolders(source, prefix string, sr *scannedRepo, scan *scanResult) error {
+	dir := filepath.Join(source, "repos", prefix, DocFoldersSubdir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read folders dir: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		folder := DocFolderFolder(prefix, entry.Name())
+		yamlBytes, err := os.ReadFile(filepath.Join(source, filepath.FromSlash(DocFolderYAMLFile(folder))))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("read doc folder %s: %w", entry.Name(), err)
+		}
+		parsed, err := ParseDocFolderYAML(yamlBytes)
+		if err != nil {
+			return fmt.Errorf("parse doc folder %s: %w", entry.Name(), err)
+		}
+		if parsed.UUID == "" {
+			return fmt.Errorf("doc folder %s: folder.yaml has no uuid", entry.Name())
+		}
+		sr.DocFolders[parsed.UUID] = &scannedDocFolder{Parsed: parsed, Folder: folder}
+		scan.seenUUIDs[store.SyncKindDocFolder][parsed.UUID] = struct{}{}
+	}
+	return nil
+}
+
+// scanKanbanColumns walks repos/<prefix>/kanban/<uuid>/column.yaml.
+// Mirrors scanDocFolders exactly.
+func (e *Engine) scanKanbanColumns(source, prefix string, sr *scannedRepo, scan *scanResult) error {
+	dir := filepath.Join(source, "repos", prefix, KanbanColumnsSubdir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read kanban dir: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		folder := KanbanColumnFolder(prefix, entry.Name())
+		yamlBytes, err := os.ReadFile(filepath.Join(source, filepath.FromSlash(KanbanColumnYAMLFile(folder))))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("read kanban column %s: %w", entry.Name(), err)
+		}
+		parsed, err := ParseKanbanColumnYAML(yamlBytes)
+		if err != nil {
+			return fmt.Errorf("parse kanban column %s: %w", entry.Name(), err)
+		}
+		if parsed.UUID == "" {
+			return fmt.Errorf("kanban column %s: column.yaml has no uuid", entry.Name())
+		}
+		sr.KanbanColumns[parsed.UUID] = &scannedKanbanColumn{Parsed: parsed, Folder: folder}
+		scan.seenUUIDs[store.SyncKindKanbanColumn][parsed.UUID] = struct{}{}
 	}
 	return nil
 }

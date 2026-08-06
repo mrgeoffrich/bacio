@@ -65,6 +65,9 @@ func (e *RepoConfirmError) Error() string {
 // returns for every refusal that has structured detail the HTTP handler
 // must map to a specific status code. Kind is one of:
 //   - "not_phantom"          — the row exists but already has a path.
+//   - "workspace"            — the row is a workspace: pathless like a
+//     phantom, but with no git project anywhere to bind to, so the
+//     refusal is permanent rather than "clone it and retry".
 //   - "path_not_absolute"    — the user passed a relative path.
 //   - "path_not_exists"      — the path does not exist on disk.
 //   - "path_not_git"         — the path exists but is not a git working tree.
@@ -90,6 +93,8 @@ func (e *RepoLinkError) Error() string {
 	switch e.Kind {
 	case "not_phantom":
 		return "repo " + e.Prefix + " is not a phantom (path=" + e.CurrentPath + ")"
+	case "workspace":
+		return "repo " + e.Prefix + " is a workspace, not a git repo — there is no working tree to link"
 	case "path_not_absolute":
 		return "path must be absolute: " + e.Path
 	case "path_not_exists":
@@ -164,6 +169,23 @@ type Client interface {
 	// right now. Cross-repo and cheap enough to poll: one aggregate
 	// query, one row per repo, including repos with no activity at all.
 	RepoActivities(ctx context.Context) ([]RepoActivity, error)
+
+	// ----- Workspaces -----
+	// CreateWorkspace registers a manual workspace: a repo row with
+	// kind='workspace', no path, no remote. It is the second half of the
+	// repos.kind discriminator — everything downstream (issues,
+	// documents, doc folders, Kanban lanes) hangs off the returned row
+	// exactly as it does for a git repo, but there is no working tree, so
+	// filesystem-shaped verbs (sync setup, agent dispatch, doc
+	// export --to-path) refuse it with a workspace-specific message.
+	//
+	// in.Prefix is optional: empty allocates one from the name via the
+	// same AllocatePrefix machinery a git registration uses. The store
+	// bootstraps the mandatory catch-all features AND the starter Kanban
+	// board (Backlog/Doing/Waiting/Done) as part of the insert — a
+	// workspace has no cwd to be auto-registered from later, so nothing
+	// else would ever seed it.
+	CreateWorkspace(ctx context.Context, in WorkspaceCreateInput, dryRun bool) (*model.Repo, error)
 
 	// ----- Features -----
 	// ListFeatures returns the features in repo. Archived features
@@ -449,6 +471,77 @@ type Client interface {
 	// rejection.
 	GetArchivePreferences(ctx context.Context) (ArchivePreferences, error)
 	SetArchivePreferences(ctx context.Context, in ArchivePreferences, dryRun bool) (ArchivePreferences, error)
+
+	// ----- Doc folders -----
+	// Doc folders are the Confluence-style organisational tree over a
+	// repo's documents. They are PURELY organisational: `documents.filename`
+	// stays flat and globally unique per repo, so every document URL, CLI
+	// verb and sync path is unchanged by a move. A folder is addressed
+	// across transports by its **uuid**, never by its int64 id — the
+	// HTTP surface has no way to hand out ids, and the uuid is the same
+	// key the sync record layout uses.
+	//
+	// ListDocFolders returns EVERY folder in the repo, not just the roots:
+	// the tree is small, callers render it client-side, and returning it
+	// whole is what lets FindDocFolderByPath / DocFolderDisplayPath work
+	// off one round trip. Ordering is (position, name, id), so grouping
+	// the slice by ParentID yields each sibling group already in display
+	// order — the slice itself is NOT parent-before-child.
+	ListDocFolders(ctx context.Context, repo *model.Repo) ([]*model.DocFolder, error)
+	// CreateDocFolder adds a folder. in.ParentUUID == "" creates at the
+	// tree root; anything else must name a folder in this same repo.
+	CreateDocFolder(ctx context.Context, repo *model.Repo, in DocFolderCreateInput, dryRun bool) (*model.DocFolder, error)
+	// RenameDocFolder renames in place; the parent is untouched.
+	RenameDocFolder(ctx context.Context, repo *model.Repo, uuid, newName string, dryRun bool) (*model.DocFolder, error)
+	// MoveDocFolder re-parents a folder (and its whole subtree).
+	// in.NewParentUUID == "" moves it to the tree root. The store refuses
+	// a move into the folder's own descendant (ErrDocFolderCycle) or one
+	// that would exceed the depth cap (ErrDocFolderTooDeep).
+	MoveDocFolder(ctx context.Context, repo *model.Repo, in DocFolderMoveInput, dryRun bool) (*model.DocFolder, error)
+	// DeleteDocFolder removes a folder. Child folders go with it; the
+	// DOCUMENTS in the deleted subtree are re-rooted, never deleted —
+	// deleting a folder is an organisational act, never a way to lose
+	// content. Same (deleted, preview, err) shape as DeleteDocument:
+	// dryRun returns (nil, preview, nil).
+	DeleteDocFolder(ctx context.Context, repo *model.Repo, uuid string, dryRun bool) (deletedFolder *model.DocFolder, preview *DocFolderDeletePreview, err error)
+	// MoveDocumentToFolder files a document. in.FolderUUID == "" moves it
+	// back to the tree root. in.Position is a nil-able sort key: nil
+	// appends after the folder's current members. Deliberately does NOT
+	// bump documents.updated_at — folder membership lives on the folder's
+	// synced record, not the document's.
+	MoveDocumentToFolder(ctx context.Context, repo *model.Repo, in DocumentFolderMoveInput, dryRun bool) (*model.Document, error)
+
+	// ----- Kanban lanes -----
+	// The Kanban is the SECOND AXIS, orthogonal to model.State: a card is
+	// on the board iff its kanban_column_id is non-NULL. A git repo's
+	// issues start off the board (they live on the Agentic Pipeline
+	// Backlog only) and are opted in explicitly; a workspace's issues
+	// default onto the first lane at create time. Lanes are addressed
+	// across transports by **uuid**, like doc folders.
+	//
+	// ListKanbanColumns returns the repo's lanes in board order
+	// (position ascending; positions are dense 0..n-1).
+	ListKanbanColumns(ctx context.Context, repo *model.Repo) ([]*model.KanbanColumn, error)
+	// CreateKanbanColumn appends a lane to the right-hand end of the board.
+	CreateKanbanColumn(ctx context.Context, repo *model.Repo, name string, dryRun bool) (*model.KanbanColumn, error)
+	RenameKanbanColumn(ctx context.Context, repo *model.Repo, uuid, newName string, dryRun bool) (*model.KanbanColumn, error)
+	// ReorderKanbanColumn moves a lane to `position` (0-based, clamped to
+	// [0, n-1]) and re-densifies the board. It returns ONLY the moved
+	// lane — its siblings' positions have shifted underneath it, so a
+	// caller rendering board order re-reads ListKanbanColumns rather than
+	// patching one row in place. (Returning the whole board here instead
+	// would force the shared PATCH route to have two response shapes.)
+	ReorderKanbanColumn(ctx context.Context, repo *model.Repo, uuid string, position int, dryRun bool) (*model.KanbanColumn, error)
+	// DeleteKanbanColumn removes a lane and takes its cards off the board.
+	// The issues themselves are never deleted. Same (deleted, preview,
+	// err) shape as DeleteDocFolder.
+	DeleteKanbanColumn(ctx context.Context, repo *model.Repo, uuid string, dryRun bool) (deletedColumn *model.KanbanColumn, preview *KanbanColumnDeletePreview, err error)
+	// MoveIssueToKanbanColumn places a card. in.ColumnUUID == "" takes it
+	// OFF the board (kanban_column_id = NULL) — that is the only way to
+	// un-opt a git repo's card. in.Position is 0-based and nil appends to
+	// the end of the target lane. Deliberately does NOT bump
+	// issues.updated_at; board membership lives on the lane's record.
+	MoveIssueToKanbanColumn(ctx context.Context, repo *model.Repo, in IssueKanbanMoveInput, dryRun bool) (*model.Issue, error)
 
 	// SyncStatuses returns the BACI-89 background-sync status of every
 	// tracked repo — last_sync_at, last error, configured, and the
@@ -1081,6 +1174,58 @@ type DocCreateInput struct {
 	Type       model.DocumentType
 	Body       string
 	SourcePath string
+}
+
+// WorkspaceCreateInput is the tuple CreateWorkspace consumes. Name is
+// required. Prefix is optional — empty allocates one from Name through
+// the same AllocatePrefix machinery every git registration uses, so the
+// user's "4-letter workspaces" IS the existing prefix concept and lives
+// in one namespace with the git repos.
+type WorkspaceCreateInput struct {
+	Name   string `json:"name"`
+	Prefix string `json:"prefix,omitempty"`
+}
+
+// DocFolderCreateInput is the tuple CreateDocFolder consumes.
+// ParentUUID == "" means the tree root — the root is not itself a
+// folder, so "" is unambiguous rather than a missing value.
+type DocFolderCreateInput struct {
+	Name       string `json:"name"`
+	ParentUUID string `json:"parent_uuid,omitempty"`
+}
+
+// DocFolderMoveInput is the tuple MoveDocFolder consumes. UUID names
+// the folder being moved; NewParentUUID == "" re-roots it.
+type DocFolderMoveInput struct {
+	UUID          string
+	NewParentUUID string
+}
+
+// DocumentFolderMoveInput is the tuple MoveDocumentToFolder consumes.
+// FolderUUID == "" files the document at the tree root.
+//
+// Position is a *sort key*, not a dense index (unlike the Kanban's) —
+// siblings may share one, and ListDocuments tie-breaks on filename, so
+// every pre-pivot document sitting at 0 keeps its historical
+// alphabetical order. nil means "append after the folder's current
+// members"; over the wire that is the `position` field being ABSENT.
+type DocumentFolderMoveInput struct {
+	Filename   string `json:"filename"`
+	FolderUUID string `json:"folder_uuid"`
+	Position   *int   `json:"position,omitempty"`
+}
+
+// IssueKanbanMoveInput is the tuple MoveIssueToKanbanColumn consumes.
+// ColumnUUID == "" takes the card off the board entirely.
+//
+// Position is the 0-based top-to-bottom slot in the target lane; the
+// lane is re-densified to 0..n-1 around it. nil means "append to the
+// end of the lane"; over the wire that is the `position` field being
+// ABSENT.
+type IssueKanbanMoveInput struct {
+	IssueKey   string `json:"issue_key"`
+	ColumnUUID string `json:"column_uuid"`
+	Position   *int   `json:"position,omitempty"`
 }
 
 // AddSessionQuestionInput is the validated tuple AddSessionQuestion

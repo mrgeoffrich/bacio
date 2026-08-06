@@ -39,6 +39,13 @@ const (
 	// has never seen — neither real nor phantom. Treated as "you
 	// could clone this project if you wanted to".
 	StatusAbsent MembershipStatus = "absent"
+	// StatusWorkspace: the local DB has a workspace row for this
+	// prefix. A workspace is permanently pathless, so the historical
+	// `path == ""` test would have reported it as a phantom — which is
+	// a lie in both directions: there is no checkout to go and link,
+	// and the data is fully present locally rather than living on
+	// another machine.
+	StatusWorkspace MembershipStatus = "workspace"
 )
 
 // MemberProject is one entry in the discovered membership list. For
@@ -103,7 +110,11 @@ func DiscoverMembership(syncRepoRoot string, lookup PrefixLookup) ([]MemberProje
 			out = append(out, MemberProject{Prefix: prefix, Status: StatusAbsent})
 		case err != nil:
 			return nil, fmt.Errorf("lookup prefix %s: %w", prefix, err)
-		case repo.Path == "":
+		// A workspace is checked BEFORE the pathless test: both are
+		// pathless, and only `kind` tells them apart.
+		case repo.IsWorkspace():
+			out = append(out, MemberProject{Prefix: prefix, Status: StatusWorkspace, Repo: repo})
+		case repo.IsPhantom():
 			out = append(out, MemberProject{Prefix: prefix, Status: StatusPhantom, Repo: repo})
 		default:
 			out = append(out, MemberProject{Prefix: prefix, Status: StatusLinked, Repo: repo})

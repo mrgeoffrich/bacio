@@ -73,8 +73,14 @@ type MemberProjectEntry struct {
 // UnsyncedProjectEntry is one entry in Registry.UnsyncedProjects: a
 // tracked project repo (non-empty path) that doesn't yet have a
 // sync.remote in its .bacio/config.yaml, or whose remote isn't in the
-// registry. Phantom rows (path == "") are excluded — they're already
-// surfaced under their sync repo's Members.
+// registry. Phantom rows are excluded — they're already surfaced under
+// their sync repo's Members.
+//
+// Workspaces are included and carry an empty Path: they are pathless by
+// construction, cannot drive a sync tick, and are mirrored only when
+// some git repo drives one — so "no sync repo I have carries this
+// prefix" is exactly what a user needs to be told. See BuildRegistry's
+// second pass.
 type UnsyncedProjectEntry struct {
 	Prefix string
 	Name   string
@@ -140,7 +146,11 @@ func BuildRegistry(s RegistryStore, log *slog.Logger) (*Registry, error) {
 			members = nil
 		}
 		for _, m := range members {
-			if m.Status == StatusLinked || m.Status == StatusPhantom {
+			// StatusWorkspace counts as accounted for the same reason
+			// linked and phantom do: the prefix is present in this sync
+			// repo's clone, so it is already surfaced under Members and
+			// must not be double-reported in the unsynced residual.
+			if m.Status == StatusLinked || m.Status == StatusPhantom || m.Status == StatusWorkspace {
 				accountedPrefixes[m.Prefix] = true
 			}
 		}
@@ -156,18 +166,40 @@ func BuildRegistry(s RegistryStore, log *slog.Logger) (*Registry, error) {
 	}
 
 	// Second pass: the unsynced-projects residual. A repo qualifies iff
-	// it has a real working tree (path != "") AND it isn't already
-	// surfaced via the registry AND its .bacio/config.yaml either is
-	// missing, empty, or points at a remote the registry doesn't carry.
+	// it has a real working tree AND it isn't already surfaced via the
+	// registry AND its .bacio/config.yaml either is missing, empty, or
+	// points at a remote the registry doesn't carry.
+	//
+	// Pathless rows are skipped, and that covers BOTH kinds for
+	// different reasons. A phantom is git-kind with the checkout on
+	// another machine, and the row only exists because some sync repo
+	// already carries the prefix — there is nothing to set up. A
+	// workspace has no working tree and therefore no .bacio/config.yaml,
+	// so under D4 it can never drive a sync tick of its own; it is
+	// mirrored for free by the whole-DB export the moment ANY git repo
+	// drives one.
+	//
+	// This list is a CALL TO ACTION, not an inventory: every row renders
+	// as a "set up sync" affordance (SyncSettingsSection ->
+	// SyncSetupModal), and SetupSync refuses a pathless repo outright.
+	// Listing a workspace would therefore offer a button that cannot
+	// work. Whether a workspace is actually mirrored is real and useful
+	// information, but its home is the BACI-376 sync badge, which already
+	// reports actual mirroring rather than per-repo config.
+	//
+	// internal/client/sync_status.go's parallel implementation gates on
+	// the same predicate; the two must not diverge.
 	unsynced := make([]UnsyncedProjectEntry, 0)
 	for _, repo := range repos {
-		if repo.Path == "" {
+		if !repo.HasWorkingTree() {
 			continue
 		}
 		if accountedPrefixes[repo.Prefix] {
 			continue
 		}
-		if isRepoInRegistry(repo.Path, registryURLs, log) {
+		// A workspace has no path to read a project config from; the
+		// registry lookup only makes sense for a real checkout.
+		if repo.HasWorkingTree() && isRepoInRegistry(repo.Path, registryURLs, log) {
 			continue
 		}
 		unsynced = append(unsynced, UnsyncedProjectEntry{

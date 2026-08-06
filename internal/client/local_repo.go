@@ -132,12 +132,24 @@ func (c *localClient) LinkPhantomRepo(ctx context.Context, prefix, path string, 
 
 	// (2) Idempotent re-link: the row already points at this path.
 	// Return success with AlreadyLinked=true and no side effects.
-	if repo.Path != "" && repo.Path == path {
+	if repo.HasWorkingTree() && repo.Path == path {
 		return &RepoLinkResult{Repo: repo, AlreadyLinked: true}, nil
 	}
 
-	// (3) Not a phantom — bail before touching the user-supplied path.
-	if repo.Path != "" {
+	// (3a) A workspace is pathless like a phantom but is NOT one: it has
+	// no git project waiting somewhere to be bound to. Linking one would
+	// break the store's (kind='workspace' ⇒ path='') invariant, so refuse
+	// with its own Kind rather than the misleading "not a phantom".
+	if repo.IsWorkspace() {
+		return nil, &RepoLinkError{
+			Kind: "workspace", Prefix: prefix, Path: path,
+			Message: "repo " + prefix + " is a workspace, not a git repo — a workspace has no working tree to link. " +
+				"Register the git repository itself with `bacio repo add` (or by running bacio inside it)",
+		}
+	}
+
+	// (3b) Not a phantom — bail before touching the user-supplied path.
+	if !repo.IsPhantom() {
 		return nil, &RepoLinkError{Kind: "not_phantom", Prefix: prefix, CurrentPath: repo.Path}
 	}
 

@@ -64,9 +64,11 @@ const setupSyncTimeout = 5 * time.Minute
 //
 // Local-only invariants mirror the HTTP handler:
 //
-//   - The repo must have a working tree (path != ""). Phantoms are
-//     refused at this layer; the engine would otherwise fail deep with
-//     a misleading "not a git repo" error.
+//   - The repo must have a working tree. Phantoms are refused at this
+//     layer; the engine would otherwise fail deep with a misleading
+//     "not a git repo" error. Workspaces are refused too, with their own
+//     message: they are mirrored by the whole-DB export rather than
+//     driving a tick of their own.
 //   - mode is one of "init" / "clone" / "attach" — anything else is a
 //     400-equivalent error.
 //   - mode="attach" looks the remote up in sync_remotes and reuses the
@@ -77,7 +79,16 @@ func (c *localClient) SetupSync(ctx context.Context, repo *model.Repo, in inputs
 	if repo == nil {
 		return nil, errors.New("SetupSync: repo is nil")
 	}
-	if repo.Path == "" {
+	// A workspace and a phantom are both pathless, but for opposite
+	// reasons, so they get opposite messages. "Link it first" would send
+	// a workspace owner hunting for a git checkout that does not and
+	// never will exist.
+	if repo.IsWorkspace() {
+		return nil, errWorkspaceHasNoWorkingTree(repo,
+			"it has no checkout to hold a .bacio/config.yaml, so it can't be set up for sync directly. "+
+				"Its issues, documents and folders are mirrored automatically whenever a git repo on this machine syncs")
+	}
+	if !repo.HasWorkingTree() {
 		return nil, fmt.Errorf("repo %s has no local working tree (phantom); link it first", repo.Prefix)
 	}
 	mode := in.Mode

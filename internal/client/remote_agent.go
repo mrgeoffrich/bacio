@@ -221,6 +221,12 @@ func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in 
 	if repo == nil {
 		return nil, fmt.Errorf("CreateDispatch requires a repo")
 	}
+	// Refused client-side as well as server-side: the caller already
+	// holds the repo row, so there's no reason to spend a round trip to
+	// be told what `kind` already says.
+	if err := refuseDispatchOnWorkspace(repo); err != nil {
+		return nil, err
+	}
 	q := url.Values{}
 	if dryRun {
 		q.Set("dry_run", "true")
@@ -239,6 +245,9 @@ func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in 
 func (c *remoteClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("AutoDispatchIssue requires a repo")
+	}
+	if err := refuseDispatchOnWorkspace(repo); err != nil {
+		return nil, err
 	}
 	q := url.Values{}
 	if dryRun {
