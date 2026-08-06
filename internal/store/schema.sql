@@ -3,8 +3,27 @@ CREATE TABLE IF NOT EXISTS repos (
     uuid               TEXT    NOT NULL,
     prefix             TEXT    NOT NULL UNIQUE,
     name               TEXT    NOT NULL,
+    -- kind discriminates a git-backed repo ('git', the default and the
+    -- only value before the workspaces pivot) from a manual workspace
+    -- ('workspace') — a bacio-only container that has no checkout, no
+    -- remote and no working tree, but still owns a 4-char prefix,
+    -- issues, documents and folders. It exists because `path = ''` was
+    -- already overloaded to mean "phantom" (a synced prefix with no
+    -- local checkout); the pair (kind, path) disambiguates:
+    --
+    --   kind='git'       path=''      -> phantom (synced, no checkout here)
+    --   kind='git'       path='/abs'  -> a linked git repo
+    --   kind='workspace' path=''      -> a manual workspace (store-enforced)
+    --   kind='workspace' path!=''     -> impossible; rejected at the store boundary
+    --
+    -- No SQL CHECK: model.RepoKind guards the enum at the store
+    -- boundary, matching the rationale on issues.state below. DEFAULT
+    -- 'git' means every pre-pivot row migrates to a git repo with no
+    -- backfill pass.
+    kind               TEXT    NOT NULL DEFAULT 'git',
     -- path is empty for "phantom" repos (a prefix that exists in the
-    -- sync repo but has no local working tree on this machine yet).
+    -- sync repo but has no local working tree on this machine yet) and
+    -- for every workspace (see kind above).
     -- The UNIQUE-on-path guarantee is preserved by uniq_repos_path
     -- below, which is partial — multiple phantoms (path = '') can
     -- coexist while real working trees still get the dedup guarantee.
@@ -83,6 +102,37 @@ CREATE TABLE IF NOT EXISTS features (
 -- databases that pre-date the archived_at column (BACI-68). Same
 -- pattern as idx_issues_assignee below.
 
+-- kanban_columns is the per-repo set of human-work lanes on the Kanban
+-- board. It is a SEPARATE AXIS from issues.state: `state` stays the
+-- agent/pipeline lifecycle (todo -> in_pipeline -> to_be_shipped -> …)
+-- while kanban_column_id is the lane a human dragged the card into.
+-- Keeping them orthogonal is what avoids the double-render problem —
+-- `todo` is already the Agentic Pipeline's Backlog column, so a
+-- state-keyed Kanban would show the same card on two pages with two
+-- drag semantics. A card appears on the Kanban if and only if
+-- issues.kanban_column_id IS NOT NULL.
+--
+-- Declared before `issues` deliberately: issues.kanban_column_id
+-- REFERENCEs it. Named KanbanColumn (not BoardColumn) throughout —
+-- `BoardColumn` is already a shipped DTO meaning {state, label} and
+-- `Board` already means *repo* everywhere in this codebase.
+--
+-- position is the left-to-right lane order (0-based, dense by
+-- convention but gaps are harmless — reads sort by it). uuid is the
+-- sync-side cross-machine identity, same as every other synced record.
+CREATE TABLE IF NOT EXISTS kanban_columns (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid       TEXT    NOT NULL,
+    repo_id    INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_kanban_columns_name ON kanban_columns(repo_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_kanban_columns_uuid ON kanban_columns(uuid);
+
 CREATE TABLE IF NOT EXISTS issues (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     uuid        TEXT    NOT NULL,
@@ -151,6 +201,19 @@ CREATE TABLE IF NOT EXISTS issues (
     -- to go = lowest value). 0 is the unordered default; the other
     -- columns ignore it. Reordering writes it via Store.ReorderIssue.
     priority    INTEGER NOT NULL DEFAULT 0,
+    -- kanban_column_id / kanban_position place the card on the human
+    -- Kanban board (see kanban_columns above). NULL column id = the
+    -- card is NOT on the Kanban — that single rule is what keeps the
+    -- Kanban and the Agentic Pipeline from double-rendering the same
+    -- `todo` card. A workspace's `issue add` defaults the column to the
+    -- first lane (everything on the board); a git repo's leaves it NULL
+    -- until the user drags the card on or runs `bacio kanban move`.
+    -- ON DELETE SET NULL drops cards off the board when a lane is
+    -- deleted rather than deleting the issues. kanban_position is the
+    -- manual top-to-bottom order within the lane (0-based), the lane-
+    -- scoped sibling of `priority`.
+    kanban_column_id INTEGER REFERENCES kanban_columns(id) ON DELETE SET NULL,
+    kanban_position  INTEGER NOT NULL DEFAULT 0,
     -- engine_mode / engine_pause_reason are the per-issue controller
     -- engine fields, meaningful only while the issue is in_pipeline.
     -- engine_mode is 'off' (manual Start advances one job) or 'auto'
@@ -270,6 +333,49 @@ CREATE TABLE IF NOT EXISTS issue_tags (
 
 CREATE INDEX IF NOT EXISTS idx_issue_tags_tag ON issue_tags(tag);
 
+-- doc_folders is the Confluence-style page tree: a per-repo hierarchy
+-- of named folders that documents hang off. parent_id is a self-FK
+-- (NULL = a root folder), so the tree is walked in Go rather than
+-- stored as a materialised path — a folder rename must never rewrite N
+-- document rows and N doc.yaml files, and a stored path would tempt
+-- loosening ValidateDocFilenameStrict to admit '/', which is exactly
+-- the character the sync layer's flat `docs/<filename>/` record folder
+-- cannot survive.
+--
+-- Folders are PURELY organisational. documents.filename stays flat and
+-- globally unique per repo (UNIQUE(repo_id, filename) below is
+-- untouched), so every URL, CLI verb, HTTP route and on-disk sync path
+-- is unchanged by the tree. Display paths ("Design/API/Auth") are
+-- derived by walking parent_id, never stored.
+--
+-- Declared before `documents` deliberately: documents.folder_id
+-- REFERENCEs it. ON DELETE CASCADE on parent_id deletes a subtree with
+-- its root; ON DELETE SET NULL on documents.folder_id sends orphaned
+-- pages back to the tree root rather than deleting them.
+CREATE TABLE IF NOT EXISTS doc_folders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid       TEXT    NOT NULL,
+    repo_id    INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    parent_id  INTEGER REFERENCES doc_folders(id) ON DELETE CASCADE,  -- NULL = root
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_doc_folders_uuid ON doc_folders(uuid);
+-- Two PARTIAL uniques rather than one composite UNIQUE(repo_id,
+-- parent_id, name): SQLite treats NULLs as DISTINCT inside a composite
+-- UNIQUE, so a plain three-column constraint would happily admit two
+-- root folders called "Design" (both with parent_id NULL). Splitting on
+-- the NULL-ness of parent_id enforces sibling-name uniqueness at both
+-- the root and every interior node. Same trick as uniq_repos_path and
+-- uniq_doc_issue.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_doc_folders_child
+    ON doc_folders(repo_id, parent_id, name) WHERE parent_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_doc_folders_root
+    ON doc_folders(repo_id, name)            WHERE parent_id IS NULL;
+
 CREATE TABLE IF NOT EXISTS documents (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     uuid        TEXT    NOT NULL,
@@ -293,6 +399,20 @@ CREATE TABLE IF NOT EXISTS documents (
     -- with zero links are NOT orphans and are left alone. Manual
     -- `bacio doc archive` / `unarchive` writes or clears it on demand.
     archived_at DATETIME,
+    -- folder_id / folder_position place the document in the doc_folders
+    -- tree (see above). NULL folder = the document sits at the tree
+    -- root, which is where every pre-pivot document lands with no
+    -- backfill. ON DELETE SET NULL so deleting a folder re-roots its
+    -- pages instead of destroying them. folder_position is the manual
+    -- top-to-bottom order within the folder (0-based); reads keep
+    -- `filename` as the tie-break so an all-zero folder still sorts
+    -- deterministically.
+    --
+    -- NOTE: filename remains flat and globally unique per repo — the
+    -- UNIQUE(repo_id, filename) below is deliberately unchanged. The
+    -- folder is metadata, not part of the document's identity.
+    folder_id       INTEGER REFERENCES doc_folders(id) ON DELETE SET NULL,
+    folder_position INTEGER NOT NULL DEFAULT 0,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, filename)
@@ -443,7 +563,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_prompt_templates_name_ci
 CREATE TABLE IF NOT EXISTS sync_state (
     uuid             TEXT    NOT NULL PRIMARY KEY,
     kind             TEXT    NOT NULL CHECK (kind IN
-                       ('issue','feature','document','comment','feature_comment','repo')),
+                       ('issue','feature','document','comment','feature_comment','repo',
+                        'doc_folder','kanban_column')),
     last_synced_at   DATETIME NOT NULL,
     last_synced_hash TEXT    NOT NULL
 );

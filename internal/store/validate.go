@@ -444,6 +444,72 @@ func ValidateDocFilenameStrict(name string) (string, error) {
 	return name, nil
 }
 
+// maxFolderNameLen caps a single doc-folder name. Same bound as a
+// document filename: a folder name is a sibling of a filename in the
+// same tree and obeys the same character rules, so it gets the same
+// ceiling.
+const maxFolderNameLen = maxFilenameLen
+
+// maxKanbanColumnNameLen caps a Kanban column name. Tighter than a
+// folder name — the lane header is a fixed-width board affordance, so a
+// runaway label breaks the layout rather than merely reading oddly.
+const maxKanbanColumnNameLen = maxNameLen
+
+// ValidateFolderName enforces the doc-folder naming rules at the store
+// boundary. Same shape as ValidateDocFilenameStrict, and deliberately
+// just as strict about '/' and '\\': a folder name is ONE segment of a
+// derived display path ("Design/API/Auth"), and admitting a separator
+// would let a single folder forge a fake hierarchy — and, once it
+// reached the sync layer's path builders, nest a record folder inside
+// another record folder, which an older bacio binary resolves by
+// deleting the outer record wholesale.
+func ValidateFolderName(name string) (string, error) {
+	return validateTreeNodeName(name, "folder name", maxFolderNameLen)
+}
+
+// ValidateKanbanColumnName enforces the Kanban lane naming rules at the
+// store boundary. Same rules as ValidateFolderName with a tighter
+// length cap; '/' and '\\' are rejected so a lane name is always safe
+// to use as one path segment in the sync record layout.
+func ValidateKanbanColumnName(name string) (string, error) {
+	return validateTreeNodeName(name, "column name", maxKanbanColumnNameLen)
+}
+
+// validateTreeNodeName is the shared body behind ValidateFolderName and
+// ValidateKanbanColumnName. It mirrors ValidateDocFilenameStrict rule
+// for rule — reject invalid UTF-8, empty, leading/trailing whitespace,
+// over-length, the special names "." and "..", '/' and '\\', and every
+// C0 control plus DEL — parameterised on the field label so the error
+// messages read naturally for each caller. ValidateDocFilenameStrict
+// itself is intentionally left standing on its own copy of this logic:
+// its exact messages are load-bearing for existing callers and tests.
+func validateTreeNodeName(name, field string, maxLen int) (string, error) {
+	if !utf8.ValidString(name) {
+		return "", fmt.Errorf("%s is not valid UTF-8", field)
+	}
+	if name == "" {
+		return "", fmt.Errorf("%s is required", field)
+	}
+	if strings.TrimSpace(name) != name {
+		return "", fmt.Errorf("%s must not have leading or trailing whitespace", field)
+	}
+	if len(name) > maxLen {
+		return "", fmt.Errorf("%s too long: %d chars, max %d", field, len(name), maxLen)
+	}
+	if name == "." || name == ".." {
+		return "", fmt.Errorf("%s %q is not allowed", field, name)
+	}
+	for _, r := range name {
+		switch {
+		case r == '/' || r == '\\':
+			return "", fmt.Errorf("%s must not contain '/' or '\\'", field)
+		case isDisallowedControlSingle(r):
+			return "", fmt.Errorf("%s contains a disallowed control character (U+%04X)", field, r)
+		}
+	}
+	return name, nil
+}
+
 // maxTodoContentBytes caps a single task-list item's content. Generous
 // for a real task subject; tight enough that a malformed payload
 // surfaces before it lands in agent_session_todos. Shared with

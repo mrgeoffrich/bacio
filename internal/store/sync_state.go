@@ -28,6 +28,16 @@ const (
 	SyncKindComment        = "comment"
 	SyncKindFeatureComment = "feature_comment"
 	SyncKindRepo           = "repo"
+	// SyncKindDocFolder / SyncKindKanbanColumn are the two container
+	// record kinds added by the workspaces/Kanban pivot. They sync as
+	// NEW sibling record folders under repos/<PREFIX>/ (folders/ and
+	// kanban/) — never as new keys inside an existing repo.yaml /
+	// issue.yaml / doc.yaml, which an older binary's strict YAML decode
+	// would hard-fail on. Membership (which docs are in a folder, which
+	// issues are in a lane) lives on the CONTAINER side for the same
+	// reason.
+	SyncKindDocFolder    = "doc_folder"
+	SyncKindKanbanColumn = "kanban_column"
 )
 
 // MarkSynced upserts a sync_state row with last_synced_at = now and
@@ -136,7 +146,8 @@ func (s *Store) ListSyncedUUIDs(kind string) ([]string, error) {
 // Go-side validation rather than the SQLite-side write.
 func validSyncKind(kind string) bool {
 	switch kind {
-	case SyncKindIssue, SyncKindFeature, SyncKindDocument, SyncKindComment, SyncKindFeatureComment, SyncKindRepo:
+	case SyncKindIssue, SyncKindFeature, SyncKindDocument, SyncKindComment,
+		SyncKindFeatureComment, SyncKindRepo, SyncKindDocFolder, SyncKindKanbanColumn:
 		return true
 	}
 	return false

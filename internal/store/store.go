@@ -1068,6 +1068,91 @@ func migrate(db *sql.DB) error {
 			}
 		}
 	}
+	// ---------------------------------------------------------------
+	// Workspaces / Kanban / doc-folders pivot.
+	//
+	// ⚠️ THESE ALTERS MUST STAY LAST IN migrate(). Every table-rebuild
+	// migration above (migrateRepoPathUnique, migrateDocumentsTypeCheck,
+	// migrateIssuesStateCheck, migrateIssuesDropUserActionReason)
+	// re-creates its table from a hard-coded CREATE + an EXPLICIT column
+	// list. A column added to repos / documents / issues *before* one of
+	// those rebuilds runs would be silently dropped by it, and the
+	// columnExists guard here would then skip re-adding it — a silent
+	// data-shape loss on exactly the oldest DBs. Adding them after every
+	// rebuild has already run makes the ordering safe by construction.
+	// If you add a rebuild migration later, put it ABOVE this block.
+	//
+	// The two new TABLES (doc_folders, kanban_columns) need no entry
+	// here at all: schema.sql is exec'd on every Open() and every
+	// statement in it is CREATE TABLE/INDEX IF NOT EXISTS, so they land
+	// on existing DBs automatically. Only new columns on pre-existing
+	// tables need an ALTER.
+	//
+	// All five ALTERs carry a constant default or none at all (the two
+	// FK columns default to NULL), which is the SQLite ALTER TABLE ADD
+	// COLUMN rule; a nullable REFERENCES clause is legal on an ALTER.
+	// ---------------------------------------------------------------
+
+	// repos.kind discriminates a git-backed repo ('git') from a manual
+	// workspace ('workspace'). DEFAULT 'git' stamps every pre-existing
+	// row, so an upgraded DB behaves exactly as before with no backfill
+	// pass. No CHECK — model.RepoKind guards the enum at the store
+	// boundary (same rationale as issues.state).
+	hasRepoKind, err := columnExists(db, "repos", "kind")
+	if err != nil {
+		return err
+	}
+	if !hasRepoKind {
+		if _, err := db.Exec(`ALTER TABLE repos ADD COLUMN kind TEXT NOT NULL DEFAULT 'git'`); err != nil {
+			return fmt.Errorf("add kind to repos: %w", err)
+		}
+	}
+	// documents.folder_id / folder_position place a document in the
+	// doc_folders tree. NULL folder = the tree root, which is where
+	// every pre-pivot document lands. No DEFAULT on folder_id so
+	// existing rows surface as NULL (root) rather than a fabricated
+	// folder reference.
+	hasDocFolderID, err := columnExists(db, "documents", "folder_id")
+	if err != nil {
+		return err
+	}
+	if !hasDocFolderID {
+		if _, err := db.Exec(`ALTER TABLE documents ADD COLUMN folder_id INTEGER REFERENCES doc_folders(id) ON DELETE SET NULL`); err != nil {
+			return fmt.Errorf("add folder_id to documents: %w", err)
+		}
+	}
+	hasDocFolderPos, err := columnExists(db, "documents", "folder_position")
+	if err != nil {
+		return err
+	}
+	if !hasDocFolderPos {
+		if _, err := db.Exec(`ALTER TABLE documents ADD COLUMN folder_position INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add folder_position to documents: %w", err)
+		}
+	}
+	// issues.kanban_column_id / kanban_position place a card on the
+	// human Kanban board — an axis orthogonal to issues.state. NULL
+	// column id = the card is NOT on the Kanban, which is where every
+	// pre-pivot issue lands: an upgraded DB opens with an empty board
+	// and nothing double-renders against the Agentic Pipeline.
+	hasIssueKanbanColumn, err := columnExists(db, "issues", "kanban_column_id")
+	if err != nil {
+		return err
+	}
+	if !hasIssueKanbanColumn {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN kanban_column_id INTEGER REFERENCES kanban_columns(id) ON DELETE SET NULL`); err != nil {
+			return fmt.Errorf("add kanban_column_id to issues: %w", err)
+		}
+	}
+	hasIssueKanbanPos, err := columnExists(db, "issues", "kanban_position")
+	if err != nil {
+		return err
+	}
+	if !hasIssueKanbanPos {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN kanban_position INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add kanban_position to issues: %w", err)
+		}
+	}
 	// BACI-316 retired agent_sessions.worktree_slug (the X-Bacio-Corr
 	// correlation key); a leftover column on an already-migrated DB is inert.
 	return nil
@@ -2240,12 +2325,21 @@ func txColumnExists(tx *sql.Tx, table, column string) (bool, error) {
 func (s *Store) Close() error { return s.DB.Close() }
 
 // migrateSyncStateKindCheck rebuilds sync_state to widen its `kind`
-// CHECK so that 'feature_comment' (BACI-124) joins the existing
+// CHECK so that 'feature_comment' (BACI-124) and then 'doc_folder' /
+// 'kanban_column' (the workspaces/Kanban pivot) join the existing
 // allowlist. SQLite can't alter CHECK constraints in place, so we
 // follow the same drop-and-recopy pattern as
 // migrateDocumentsTypeCheck. Keyed off the stored CREATE TABLE SQL: a
-// DB whose CHECK already lists `feature_comment` (a fresh schema.sql
-// or a prior run of this migration) is a no-op.
+// DB whose CHECK already lists the NEWEST member (`kanban_column`) — a
+// fresh schema.sql or a prior run of this migration — is a no-op. The
+// staleness probe deliberately tracks the newest member rather than the
+// oldest, so widening the set again later is a one-line change here.
+//
+// sync_state is the one table in this pivot that genuinely needs the
+// rebuild dance: it is the only table whose CHECK constraint the new
+// data has to satisfy. repos / issues / documents all take plain
+// additive ALTERs because none of the columns being added or read
+// carries a CHECK.
 func migrateSyncStateKindCheck(db *sql.DB) error {
 	stale, err := syncStateKindCheckIsStale(db)
 	if err != nil {
@@ -2267,7 +2361,8 @@ func migrateSyncStateKindCheck(db *sql.DB) error {
 		CREATE TABLE sync_state_new (
 			uuid             TEXT    NOT NULL PRIMARY KEY,
 			kind             TEXT    NOT NULL CHECK (kind IN
-			                   ('issue','feature','document','comment','feature_comment','repo')),
+			                   ('issue','feature','document','comment','feature_comment','repo',
+			                    'doc_folder','kanban_column')),
 			last_synced_at   DATETIME NOT NULL,
 			last_synced_hash TEXT    NOT NULL
 		)
@@ -2305,5 +2400,8 @@ func syncStateKindCheckIsStale(db *sql.DB) (bool, error) {
 		return false, nil
 	}
 	collapsed := strings.Join(strings.Fields(sqlText.String), " ")
-	return !strings.Contains(collapsed, "'feature_comment'"), nil
+	// Probe for the NEWEST allowlist member. A DB missing it is stale
+	// whether it predates 'feature_comment' or merely predates the
+	// pivot's 'doc_folder' / 'kanban_column' — one rebuild covers both.
+	return !strings.Contains(collapsed, "'kanban_column'"), nil
 }

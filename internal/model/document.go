@@ -121,8 +121,22 @@ type Document struct {
 	// with zero links are NOT orphans and stay visible. Manual
 	// `bacio doc archive` / `unarchive` writes or clears it on demand.
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	// FolderID / FolderPosition place this document in the repo's
+	// DocFolder tree. nil folder = the document sits at the tree root,
+	// which is where every pre-pivot document lands with no backfill.
+	// Deleting a folder re-roots its pages (ON DELETE SET NULL) rather
+	// than destroying them.
+	//
+	// The folder is METADATA, not identity: Filename stays flat and
+	// globally unique per repo, so `documents/<filename>` URLs, the
+	// whole `bacio doc` CLI and the flat `docs/<filename>/` sync record
+	// layout are all unchanged by the tree. FolderPosition is the
+	// manual order within the folder (0-based), with Filename as the
+	// read-side tie-break.
+	FolderID       *int64    `json:"folder_id,omitempty"`
+	FolderPosition int       `json:"folder_position"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 	// Links (BACI-204) is the document's link rows, optionally
 	// hydrated by ListDocuments so the Documents list surface can
 	// render linked-issue / linked-feature chips without an N+1
