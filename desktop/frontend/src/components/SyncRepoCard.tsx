@@ -1,5 +1,6 @@
 import Tooltip from './Tooltip';
 import type { SyncRepoDTO, MemberProjectDTO } from '../api';
+import './workspace/workspace.css';
 
 // formatSyncTime renders an ISO timestamp as a short local string.
 // Mirrors Topbar.tsx's formatSyncTime so the per-card subtitle reads
@@ -74,7 +75,21 @@ export default function SyncRepoCard({ entry, onLinkPhantom }: SyncRepoCardProps
           {projects.map((p: MemberProjectDTO) => {
             const isPhantom = p.status === 'phantom';
             const isAbsent = p.status === 'absent';
+            // A workspace member is a pathless row like a phantom, but for
+            // the opposite reason: a phantom's checkout is on some other
+            // machine, while a workspace has no checkout anywhere and
+            // never will. So it gets no "Link local…" button (there is
+            // nothing to link) and isn't muted (it is fully present and
+            // being mirrored, not a gap in this machine's picture).
+            const isWorkspace = p.status === 'workspace';
             const stateClass = `mk-pill mk-status-${p.status}`;
+            const statusPill = isWorkspace ? (
+              <Tooltip label="A workspace has no working tree — nothing to link. Its data is mirrored into this sync repo by the whole-DB export.">
+                <span className={stateClass}>{p.status}</span>
+              </Tooltip>
+            ) : (
+              <span className={stateClass}>{p.status}</span>
+            );
             return (
               <li
                 key={p.prefix}
@@ -82,7 +97,7 @@ export default function SyncRepoCard({ entry, onLinkPhantom }: SyncRepoCardProps
               >
                 <span className="mk-sync-project-prefix">{p.prefix}</span>
                 <span className="mk-sync-project-name">{p.name || '—'}</span>
-                <span className={stateClass}>{p.status}</span>
+                {statusPill}
                 {isPhantom && (
                   onLinkPhantom ? (
                     <button

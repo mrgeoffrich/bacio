@@ -57,7 +57,11 @@ export interface MemberProjectApi {
   prefix: string;
   name: string;
   uuid?: string;
-  status: 'linked' | 'phantom' | 'absent';
+  // 'workspace' joined the enum with the pivot: a workspace row in a sync
+  // repo is pathless like a phantom, but it is fully present and being
+  // mirrored rather than waiting to be linked, so the two must not be
+  // conflated. See internal/sync/membership.go's MembershipStatus.
+  status: 'linked' | 'phantom' | 'absent' | 'workspace';
 }
 
 export interface UnsyncedProjectApi {

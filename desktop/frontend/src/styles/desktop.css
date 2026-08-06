@@ -1075,34 +1075,17 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 
 /* ============================================================
-   BACI-204 Documents redesign — three-pane faceted library that
-   replaces the flat alphabetical aside. Left rail = search +
-   Type / Links / Status facet chips with counts (collapsible per
-   BACI-219). Middle pane = sticky toolbar (sort + a re-open
-   affordance when the rail is collapsed) over a scrolling
-   rich-row list; the list flex-grows when no doc is selected so
-   it fills the previously-blank gutter to its right. Right pane
-   = the existing Render/Source viewer.
+   BACI-204 Documents facets — search + Type / Links / Status
+   chips with counts. Originally the page's own left rail; the
+   docs-tree pivot demoted them into the `<details>` fold at the
+   foot of the tree rail (see the .mk-docs-tree-* block below),
+   so the section / chip rules here are re-parented rather than
+   retired. A `Space` group joined them, whose chips carry a
+   git / workspace icon.
    The original .mk-docs / .mk-docs-svg-* / .mk-docs-transcript-*
    rules above stay intact — DocsViewer emits the same classes
    for the editor block.
    ============================================================ */
-
-/* Left rail — sticky search above three single-select facet
-   sections (Type / Links / Status). Width tuned to fit a typical
-   "architecture" / "session_retro" chip on one line at the
-   default font-size. */
-.mk-docs-rail {
-  width: 220px;
-  flex-shrink: 0;
-  overflow-y: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  background: var(--bg-3);
-  border-right: 1px solid var(--border-1);
-}
 .mk-docs-rail-section {
   display: flex;
   flex-direction: column;
@@ -1154,28 +1137,33 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* The Space chips lead with a git-branch / layers glyph; the other
+     three groups pass no icon and the gap collapses. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
+.mk-docs-rail-chip-label svg { width: 12px; height: 12px; flex: none; }
+.mk-docs-rail-chip.is-git .mk-docs-rail-chip-label svg { color: var(--status-done); }
+.mk-docs-rail-chip.is-workspace .mk-docs-rail-chip-label svg { color: var(--status-review); }
 .mk-docs-rail-chip-count {
   font-variant-numeric: tabular-nums;
   color: var(--fg-4);
   font-size: 11px;
 }
 
-/* Middle pane — toolbar + scrolling list. Toolbar sticks at the
-   top of the list pane so the sort dropdown stays in reach as
-   the user scrolls. */
-/* BACI-219: list pane flex-grows so it fills the empty space to its
-   right when no doc is selected (DocsViewer's "Pick a document" empty
-   state is lightweight). The min-width floor keeps the list legible
-   on narrow viewports and matches the original 380px width when a doc
-   IS open and the viewer claims the rest of the row. */
+/* DocsList's pane — sticky toolbar + scrolling rich rows. It was the
+   page's middle pane until the pivot; it is now the BODY OF THE RAIL,
+   shown whenever the rail flattens (a search, an active facet, or the
+   manual `All docs` switch). So it drops the 380px floor and the
+   `flex: 1` growth it needed as its own column, and stops painting a
+   background + right border — the rail around it owns both now. The
+   toolbar still sticks, so the sort dropdown stays in reach. */
 .mk-docs-list-pane {
-  min-width: 380px;
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-3);
-  border-right: 1px solid var(--border-1);
   min-height: 0;
 }
 /* BACI-234: re-open affordance for the side panels. Lives in the
@@ -1207,19 +1195,6 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   background: var(--bg-2);
   flex-shrink: 0;
 }
-/* BACI-219: collapse trigger inside the rail. Sits in the rail's head
-   strip with margin-left:auto so it pushes to the right edge. */
-.mk-docs-rail-head {
-  display: flex;
-  align-items: center;
-}
-.mk-docs-rail-collapse {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  margin-left: auto;
-}
-.mk-docs-rail-collapse svg { width: 14px; height: 14px; }
 .mk-docs-toolbar {
   display: flex;
   align-items: center;
@@ -1446,6 +1421,673 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   flex: 1;
   overflow: auto;
   min-height: 0;
+}
+
+/* ============================================================
+   Documents tree rail — the pivot's two-pane layout.
+   One 296px rail replaces the two left panes the faceted
+   library had (facets + list), which is the whole point: the
+   TipTap canvas is `max-width: 900px; padding: 48px 72px`, so
+   at 296px of chrome a 1440-wide window leaves the document at
+   its designed measure with air either side, where 654px did
+   not.
+   Rail, top to bottom: head strip · search · Tree|All docs
+   switch · space banner · body (tree OR the flat DocsList) ·
+   foot (facet fold + New page).
+   ============================================================ */
+.mk-docs-tree-rail {
+  width: 296px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-3);
+  border-right: 1px solid var(--border-1);
+}
+.mk-docs-tree-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 6px;
+  flex-shrink: 0;
+}
+.mk-docs-tree-title {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  margin-right: auto;
+  padding-left: 4px;
+}
+.mk-docs-tree-headbtn { width: 22px; height: 22px; padding: 0; }
+.mk-docs-tree-headbtn svg { width: 14px; height: 14px; }
+/* The shared search box's default margin centres it in a list pane; here
+   it sits directly under the head strip. */
+.mk-docs-tree-search { margin: 0 10px 8px; flex-shrink: 0; }
+
+/* Tree | All docs — the manual override for flatten-on-filter. Rail-
+   scoped rather than the topbar's .mk-segmented so it can shrink to the
+   rail's width without dragging the nav's metrics along. */
+.mk-docs-tree-mode {
+  display: flex;
+  gap: 2px;
+  margin: 0 10px 8px;
+  padding: 2px;
+  background: var(--bg-4);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+.mk-docs-tree-mode button {
+  flex: 1;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--fg-3);
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-docs-tree-mode button:hover { color: var(--fg-1); }
+.mk-docs-tree-mode button.is-active {
+  background: var(--bg-2);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-1);
+}
+.mk-docs-tree-mode-count {
+  opacity: .6;
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+
+/* Space banner — the at-a-glance "which space am I in, and is it a git
+   repo or a workspace". The Space group in the facet fold is the
+   switcher; this is the label. */
+.mk-docs-space-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 6px;
+  padding: 7px 9px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+.mk-docs-space-banner svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--status-done);
+}
+.mk-docs-space-banner.is-workspace svg { color: var(--status-review); }
+.mk-docs-space-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-docs-space-pill {
+  background: var(--status-done-bg);
+  color: var(--status-done);
+}
+.mk-docs-space-banner.is-workspace .mk-docs-space-pill {
+  background: var(--status-review-bg);
+  color: var(--status-review);
+}
+
+/* ---- the tree itself ---- */
+.mk-docs-tree-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 2px 8px 10px;
+}
+ul.mk-docs-tree,
+ul.mk-docs-tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* ~13px of indent per level + a hairline guide: five levels still leave
+   ~200px of label inside a 296px rail, which is the depth the design was
+   validated at. */
+ul.mk-docs-tree-children {
+  margin-left: 13px;
+  padding-left: 7px;
+  border-left: 1px solid var(--border-1);
+}
+.mk-docs-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  padding: 4px 6px 4px 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  min-height: 27px;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-docs-tree-row:hover { background: var(--bg-4); color: var(--fg-1); }
+.mk-docs-tree-row:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+}
+.mk-docs-tree-row.is-active {
+  background: var(--sky-50);
+  color: var(--fg-1);
+  border-color: var(--sky-300);
+}
+.mk-docs-tree-row.is-active .mk-docs-tree-label { font-weight: 600; }
+.mk-docs-tree-row.is-archived .mk-docs-tree-label { opacity: .65; }
+/* Live drop feedback: the source row dims, a candidate folder lights up. */
+.mk-docs-tree-row.is-drag-src {
+  opacity: .45;
+  border-style: dashed;
+  border-color: var(--border-2);
+  background: var(--bg-4);
+}
+.mk-docs-tree-row.is-drop-into {
+  background: var(--sky-50);
+  border-color: var(--sky-500);
+}
+.mk-docs-tree-grip {
+  width: 10px;
+  flex: none;
+  color: var(--fg-4);
+  opacity: 0;
+  margin-left: -2px;
+  display: flex;
+  align-items: center;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.mk-docs-tree-row:hover .mk-docs-tree-grip { opacity: 1; }
+.mk-docs-tree-twisty {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--fg-4);
+  cursor: pointer;
+  padding: 0;
+  border-radius: 3px;
+}
+.mk-docs-tree-twisty:hover { background: var(--bg-3); color: var(--fg-2); }
+.mk-docs-tree-twisty svg {
+  width: 12px;
+  height: 12px;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.mk-docs-tree-twisty svg.is-collapsed { transform: rotate(-90deg); }
+.mk-docs-tree-twisty.is-leaf { visibility: hidden; }
+.mk-docs-tree-ico { flex: none; color: var(--fg-3); }
+.mk-docs-tree-row.is-folder .mk-docs-tree-ico { color: var(--sky-300); }
+.mk-docs-tree-row.is-active .mk-docs-tree-ico { color: var(--sky-500); }
+.mk-docs-tree-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-docs-tree-row.is-folder .mk-docs-tree-label {
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.mk-docs-tree-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.mk-docs-tree-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-1);
+  background: var(--bg-2);
+  color: var(--fg-3);
+  flex: none;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-docs-tree-badge.is-issue {
+  background: var(--sky-50);
+  color: var(--sky-700);
+  border-color: transparent;
+}
+.mk-docs-tree-badge.is-archived {
+  background: var(--status-blocked-bg);
+  color: var(--status-blocked);
+  border-color: transparent;
+}
+/* Per-row affordances swap in over the count on hover, so the row never
+   grows and the tree never reflows under the pointer. */
+.mk-docs-tree-actions { display: none; gap: 1px; flex: none; margin-left: 2px; }
+.mk-docs-tree-row:hover .mk-docs-tree-actions { display: flex; }
+.mk-docs-tree-row:hover .mk-docs-tree-count { display: none; }
+.mk-docs-tree-act {
+  width: 19px;
+  height: 19px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.mk-docs-tree-act:hover { background: var(--bg-2); color: var(--fg-1); }
+.mk-docs-tree-act svg { width: 12px; height: 12px; }
+/* The insert line for a drag between two pages. */
+.mk-docs-tree-dropline {
+  height: 2px;
+  margin: 1px 6px 1px 26px;
+  border-radius: 2px;
+  background: var(--sky-500);
+  box-shadow: 0 0 0 3px var(--sky-50);
+  position: relative;
+}
+.mk-docs-tree-dropline::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sky-500);
+}
+
+/* ---- rail foot: the demoted facets + New page ---- */
+.mk-docs-rail-foot {
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-3);
+  flex-shrink: 0;
+}
+.mk-docs-facet-fold { border-bottom: 1px solid var(--border-1); }
+.mk-docs-facet-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.mk-docs-facet-summary::-webkit-details-marker { display: none; }
+.mk-docs-facet-summary:hover { color: var(--fg-2); }
+.mk-docs-facet-caret {
+  width: 9px;
+  height: 9px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(-45deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.mk-docs-facet-fold[open] .mk-docs-facet-caret {
+  transform: translateY(-1px) rotate(45deg);
+}
+/* A collapsed fold must never hide the reason the rail flipped to a flat
+   list, so the count of active facets rides on the summary. */
+.mk-docs-facet-active-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--sky-50);
+  color: var(--sky-700);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+.mk-docs-facet-body {
+  padding: 0 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.mk-docs-rail-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-align: left;
+}
+.mk-docs-rail-new:hover { background: var(--bg-4); color: var(--fg-1); }
+
+/* Row context menu (Radix dropdown). */
+.mk-docs-menu {
+  z-index: 100;
+  min-width: 180px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-3);
+}
+.mk-docs-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--fg-1);
+  outline: none;
+}
+.mk-docs-menu-item[data-highlighted] { background: var(--bg-4); }
+.mk-docs-menu-item.is-danger { color: var(--status-blocked); }
+.mk-docs-menu-item-icon {
+  display: inline-flex;
+  color: var(--fg-3);
+}
+.mk-docs-menu-item.is-danger .mk-docs-menu-item-icon { color: var(--status-blocked); }
+
+/* ---- viewer header: breadcrumb + peer jump ---- */
+.mk-docs-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--fg-3);
+  flex-wrap: wrap;
+}
+.mk-docs-crumb-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.mk-docs-crumb-sep { color: var(--fg-4); padding: 0 2px; }
+.mk-docs-crumb-link {
+  font: inherit;
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-docs-crumb-link:hover { background: var(--bg-4); color: var(--fg-1); }
+.mk-docs-crumb-here {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The filename is a literal on-disk name, so it keeps the mono face the
+   pre-pivot .mk-docs-bar-name had. */
+.mk-docs-crumb-here.is-mono { font-family: var(--font-mono); }
+.mk-docs-peer-jump { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.mk-docs-peer-btn { width: 22px; height: 22px; padding: 0; }
+.mk-docs-peer-btn svg { width: 14px; height: 14px; }
+.mk-docs-peer-btn:disabled {
+  opacity: .35;
+  cursor: default;
+  background: transparent;
+}
+
+/* ---- peer cards, at the end of the document ---- */
+.mk-docs-peer-nav {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 72px 56px;
+  display: flex;
+  gap: 12px;
+}
+.mk-docs-peer-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+}
+.mk-docs-peer-card:hover { border-color: var(--border-2); background: var(--bg-4); }
+.mk-docs-peer-card.is-next { text-align: right; align-items: flex-end; }
+.mk-docs-peer-spacer { flex: 1; min-width: 0; }
+.mk-docs-peer-dir {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.mk-docs-peer-name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* ============================================================
+   Folder page — what a folder opens as. Selecting a folder must
+   never be a dead end, so it renders a real page in the editor
+   pane: a heading, a summary line, and a LIVE children index
+   built from the same tree the rail is showing. Same measure as
+   the TipTap canvas (900px / 48px 72px) so switching between a
+   page and a folder page doesn't shift the column.
+   ============================================================ */
+.mk-docs-folder-page {
+  padding: 48px 72px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  font-family: var(--font-sans);
+  color: var(--fg-1);
+}
+.mk-docs-folder-title {
+  font-size: 2.5em;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0 0 8px;
+}
+.mk-docs-folder-lead {
+  margin: 0 0 20px;
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--fg-3);
+}
+.mk-docs-folder-index {
+  margin: 20px 0;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.mk-docs-folder-index-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-3);
+}
+.mk-docs-folder-index-head svg { color: var(--fg-4); flex: none; }
+.mk-docs-folder-index-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  margin-right: auto;
+}
+.mk-docs-folder-index-live {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  background: var(--status-claude-bg);
+  color: var(--status-claude);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+.mk-docs-folder-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.mk-docs-folder-table th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--fg-4);
+  font-weight: 600;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-1);
+}
+.mk-docs-folder-table th.col-title { width: 44%; }
+.mk-docs-folder-table th.col-type  { width: 20%; }
+.mk-docs-folder-table th.col-when  { width: 22%; }
+.mk-docs-folder-table th.col-issue { width: 14%; }
+.mk-docs-folder-table td {
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--fg-2);
+  border-bottom: 1px solid var(--border-1);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-docs-folder-table tr:last-child td { border-bottom: 0; }
+.mk-docs-folder-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--fg-1);
+  overflow: hidden;
+}
+.mk-docs-folder-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-docs-folder-link svg { flex: none; color: var(--fg-3); }
+.mk-docs-folder-link:hover { color: var(--sky-500); }
+.mk-docs-folder-link.is-folder svg { color: var(--sky-300); }
+.mk-docs-folder-when { color: var(--fg-3); font-size: 13px; }
+.mk-docs-folder-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 14px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.mk-docs-folder-empty p { margin: 0; }
+
+/* ---- create / rename / delete dialogs ---- */
+.mk-docs-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mk-docs-dialog-subject {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-1);
+  word-break: break-all;
+}
+.mk-docs-dialog-lines {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fg-3);
+}
+/* A store refusal — a duplicate filename, a duplicate sibling folder name —
+   belongs next to the input that caused it, not in the global modal, which
+   would close the dialog and lose what was typed. */
+.mk-docs-dialog-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--status-blocked);
+  background: var(--status-blocked-bg);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.mk-segmented-btn.is-danger {
+  background: var(--status-blocked-bg);
+  color: var(--status-blocked);
 }
 
 /* ============================================================

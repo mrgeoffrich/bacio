@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router';
-import Topbar, { NAV } from './components/Topbar';
+import Topbar, { navForKind } from './components/Topbar';
+import KanbanBoard from './components/kanban/KanbanBoard';
 import DocsView from './components/DocsView';
 import FeaturesView from './components/FeaturesView';
 import AgentsView from './components/AgentsView';
@@ -21,7 +22,7 @@ import { LazyMotion, domMax, LayoutGroup } from 'motion/react';
 import { reportError } from './errors';
 import * as api from './api';
 import type { BoardCard } from './api';
-import { viewPath, issuePath } from './lib/routes';
+import { viewPath, issuePath, homeView } from './lib/routes';
 import { PreferencesProvider, usePreferences } from './state/PreferencesProvider';
 import { RepoProvider, useActiveRepo } from './state/RepoProvider';
 import { AgentsProvider } from './state/AgentsProvider';
@@ -73,6 +74,13 @@ function Shell() {
   // BACI-166: the "+ from prompt" composer is a sibling modal flag — reached
   // via the Topbar's `+` button or the ⌘N shortcut.
   const [composerOpen, setComposerOpen] = useState(false);
+
+  // The active repo's kind drives two things the shell owns: which nav the
+  // digit hotkeys map onto (a workspace hides the Agentic Pipeline entry, so
+  // the digits have to shift with the buttons — see Topbar.navForKind), and
+  // which view the `/:prefix/*` catch-all lands on.
+  const activeKind = boards.find(b => b.prefix === activeBoard)?.kind;
+  const navItems = useMemo(() => navForKind(activeKind), [activeKind]);
 
   // BACI-203 / BACI-285: derive the open issue key from the route — null when
   // we're not on an issue workspace. Drives the Escape-to-close branch below.
@@ -171,14 +179,14 @@ function Shell() {
         if (isEditingTarget(e.target)) return;
         if (!activeBoard) return;
         const idx = Number(e.key) - 1;
-        if (idx < NAV.length) {
-          navigate(viewPath(activeBoard, NAV[idx].view));
+        if (idx < navItems.length) {
+          navigate(viewPath(activeBoard, navItems[idx].view));
         }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, settingsOpen, openIssueKey, activeBoard, closeIssue, navigate]);
+  }, [paletteOpen, settingsOpen, openIssueKey, activeBoard, navItems, closeIssue, navigate]);
 
   return (
     // BACI-268: tag the shell on the Pipeline route so the bottom-right
@@ -234,6 +242,19 @@ function Shell() {
               element={
                 <ErrorBoundary headline="Something went wrong in Edit Process" label="The Edit Process view crashed">
                   <ProcessEditor />
+                </ErrorBoundary>
+              }
+            />
+            {/* The Kanban board — the human work axis, orthogonal to the
+                Agentic Pipeline's issue states. `viewPath('board')` has
+                always emitted `/<prefix>/issues` (the URL alias predates the
+                pivot); the `:key` child route below is the issue workspace
+                that opens off it. */}
+            <Route
+              path="/:prefix/issues"
+              element={
+                <ErrorBoundary headline="Something went wrong in Kanban" label="The Kanban view crashed">
+                  <KanbanBoard />
                 </ErrorBoundary>
               }
             />
@@ -323,14 +344,16 @@ function Shell() {
               }
             />
             {/* Catch-all: an unknown page under a valid prefix lands on that
-                repo's Pipeline; a prefix-less / stale single-segment legacy
-                path has an empty activeBoard and falls through to the legacy
-                redirect. `/:prefix/*` outranks a bare `*` in react-router. */}
+                repo's home board — the Agentic Pipeline for a git repo, the
+                Kanban for a workspace (which has no Pipeline nav entry to
+                land on); a prefix-less / stale single-segment legacy path has
+                an empty activeBoard and falls through to the legacy redirect.
+                `/:prefix/*` outranks a bare `*` in react-router. */}
             <Route
               path="/:prefix/*"
               element={
                 <Navigate
-                  to={activeBoard ? viewPath(activeBoard, 'pipeline') : legacyRedirectTarget}
+                  to={activeBoard ? viewPath(activeBoard, homeView(activeKind)) : legacyRedirectTarget}
                   replace
                 />
               }

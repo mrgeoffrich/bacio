@@ -23,6 +23,12 @@ export interface Doc {
   archivedAt?: string | null;
   snippet?: string | null;
   links?: { issueKey?: string; featureSlug?: string; description?: string }[] | null;
+  // The pivot's hierarchy fields. Optional here (not on DocSummary, where
+  // both are required) so pre-pivot fixtures and the plain-Node smoke tests
+  // can build a row without them; `folderUuid ?? ''` is the tree root, which
+  // is exactly what a missing value should mean.
+  folderUuid?: string;
+  folderPosition?: number;
 }
 
 // LinksFacet groups every row by its link-edge presence — backs the
@@ -209,4 +215,244 @@ export function filterDocs(
   }
   const visible = sortDocs(matched, q.sort);
   return { visible, counts };
+}
+
+// ─── The page tree (the pivot) ───────────────────────────────────────
+//
+// Everything below is pure and total: no throw, no api import, no React.
+// The rail assembles the hierarchy client-side from two flat lists —
+// `api.listDocs` rows carrying `folderUuid` / `folderPosition`, and the
+// full `api.listDocFolders` list — so the display path of any node is
+// derivable without a round trip per level.
+//
+// **`''` is a value, not an absence.** `parentUuid === ''` /
+// `folderUuid === ''` means the tree ROOT, which is not itself a folder.
+
+// Folder is the structural shape this module reads off the api seam's
+// DocFolder — the fields the tree needs, nothing else, so a caller can
+// pass a DocFolder transparently (same contract as `Doc` above).
+export interface Folder {
+  uuid: string;
+  name: string;
+  parentUuid: string;
+  position: number;
+}
+
+// A folder node. `docCount` is the page count of the WHOLE subtree, which
+// is what the rail's per-row count and the "N pages" line on the folder
+// page both want — a folder whose pages all live one level down should not
+// read as empty.
+export interface DocTreeFolder {
+  kind: 'folder';
+  uuid: string;
+  name: string;
+  position: number;
+  children: DocTreeNode[];
+  docCount: number;
+}
+
+// A page node. `filename` is lifted out of `doc` because it is the
+// selection identity everywhere else in the view (URL slug, api argument,
+// React key) — filenames stay globally unique per repo, so it is a safe key.
+export interface DocTreeDoc {
+  kind: 'doc';
+  filename: string;
+  doc: Doc;
+}
+
+export type DocTreeNode = DocTreeFolder | DocTreeDoc;
+
+// The store caps folder nesting at 16. The client cap is deliberately
+// looser and exists only to guarantee the ancestry walks terminate on a
+// malformed list — it is a safety net, not a policy.
+const DEPTH_CAP = 64;
+
+function cmpFolders(a: Folder, b: Folder): number {
+  if (a.position !== b.position) return a.position - b.position;
+  return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+}
+
+// Docs inside one folder order by their manual sort key, then filename.
+// folderPosition is a SORT KEY, not a dense index: siblings may share one
+// (every pre-pivot row sits at 0), and the filename tie-break is what keeps
+// those in their historical alphabetical order.
+function cmpDocsInFolder(a: Doc, b: Doc): number {
+  const pa = a.folderPosition ?? 0;
+  const pb = b.folderPosition ?? 0;
+  if (pa !== pb) return pa - pb;
+  return a.filename.toLowerCase().localeCompare(b.filename.toLowerCase());
+}
+
+// resolveParent normalises one folder's parent pointer against the list we
+// actually hold: a dangling uuid, a cycle, or a runaway chain all resolve
+// to the root. Without this a folder whose parent is missing from the list
+// would silently disappear from the tree along with every page under it —
+// data loss on screen, from a purely presentational bug.
+function resolveParent(f: Folder, byUuid: Map<string, Folder>): string {
+  if (!f.parentUuid) return '';
+  if (!byUuid.has(f.parentUuid)) return '';
+  const seen = new Set<string>([f.uuid]);
+  let cur: string = f.parentUuid;
+  let hops = 0;
+  while (cur) {
+    if (seen.has(cur)) return ''; // cycle
+    const parent = byUuid.get(cur);
+    if (!parent) return ''; // dangling mid-chain
+    seen.add(cur);
+    cur = parent.parentUuid;
+    if (++hops > DEPTH_CAP) return '';
+  }
+  return f.parentUuid;
+}
+
+// buildTree assembles the render-ready hierarchy from the flat doc +
+// folder lists. Folders sort before pages at every level (the convention
+// every file tree the user has ever used follows, and the only stable
+// choice given folders and pages carry two independent position spaces).
+//
+// Pass the ALREADY-FILTERED doc list: the tree is a grouping of the same
+// rows the flat mode ranks, so `status`/`showArchived` are honoured for
+// free and there is only ever one index to reason about.
+export function buildTree(docs: Doc[], folders: Folder[]): DocTreeNode[] {
+  const byUuid = new Map<string, Folder>();
+  for (const f of folders) {
+    if (f.uuid) byUuid.set(f.uuid, f);
+  }
+
+  const foldersByParent = new Map<string, Folder[]>();
+  for (const f of folders) {
+    if (!f.uuid) continue;
+    const parent = resolveParent(f, byUuid);
+    const list = foldersByParent.get(parent);
+    if (list) list.push(f);
+    else foldersByParent.set(parent, [f]);
+  }
+
+  const docsByFolder = new Map<string, Doc[]>();
+  for (const d of docs) {
+    const uuid = d.folderUuid ?? '';
+    // A page filed under a folder we don't hold shows at the root rather
+    // than vanishing — same reasoning as resolveParent.
+    const parent = uuid && byUuid.has(uuid) ? uuid : '';
+    const list = docsByFolder.get(parent);
+    if (list) list.push(d);
+    else docsByFolder.set(parent, [d]);
+  }
+
+  for (const list of foldersByParent.values()) list.sort(cmpFolders);
+  for (const list of docsByFolder.values()) list.sort(cmpDocsInFolder);
+
+  const build = (parentUuid: string, depth: number): DocTreeNode[] => {
+    if (depth > DEPTH_CAP) return [];
+    const out: DocTreeNode[] = [];
+    for (const f of foldersByParent.get(parentUuid) ?? []) {
+      const children = build(f.uuid, depth + 1);
+      let docCount = 0;
+      for (const c of children) {
+        docCount += c.kind === 'folder' ? c.docCount : 1;
+      }
+      out.push({
+        kind: 'folder',
+        uuid: f.uuid,
+        name: f.name,
+        position: f.position,
+        children,
+        docCount,
+      });
+    }
+    for (const d of docsByFolder.get(parentUuid) ?? []) {
+      out.push({ kind: 'doc', filename: d.filename, doc: d });
+    }
+    return out;
+  };
+
+  return build('', 0);
+}
+
+// flattenTreeDocs walks the tree in render order and returns just the
+// pages. That order is what the header's `‹ ›` peer-jump and the footer
+// peer cards step through, so "next" always means "the next row you can
+// see", including across a folder boundary.
+export function flattenTreeDocs(nodes: DocTreeNode[]): Doc[] {
+  const out: Doc[] = [];
+  const walk = (list: DocTreeNode[]) => {
+    for (const n of list) {
+      if (n.kind === 'folder') walk(n.children);
+      else out.push(n.doc);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+// findFolderNode locates one folder node in a built tree. The folder page
+// needs the node (for its live children index), not just the DocFolder row,
+// and a selected folder can go missing under you — deleted in another
+// window, or filtered out — so the caller gets null rather than a throw and
+// falls back to the page view.
+export function findFolderNode(nodes: DocTreeNode[], uuid: string): DocTreeFolder | null {
+  if (!uuid) return null;
+  for (const n of nodes) {
+    if (n.kind !== 'folder') continue;
+    if (n.uuid === uuid) return n;
+    const hit = findFolderNode(n.children, uuid);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// folderAncestry returns the root→leaf chain for a folder uuid, for the
+// breadcrumb and for auto-expanding the rail down to the selected page.
+// Returns [] for the root ('') or an unknown uuid; total on a malformed
+// list (a cycle terminates at the depth cap).
+export function folderAncestry(folders: Folder[], uuid: string): Folder[] {
+  if (!uuid) return [];
+  const byUuid = new Map<string, Folder>();
+  for (const f of folders) {
+    if (f.uuid) byUuid.set(f.uuid, f);
+  }
+  const chain: Folder[] = [];
+  const seen = new Set<string>();
+  let cur = uuid;
+  while (cur && chain.length <= DEPTH_CAP) {
+    if (seen.has(cur)) break; // cycle
+    const f = byUuid.get(cur);
+    if (!f) break;
+    seen.add(cur);
+    chain.push(f);
+    cur = f.parentUuid;
+  }
+  chain.reverse();
+  return chain;
+}
+
+// shouldFlatten is the flatten-on-filter predicate — the answer to the 208
+// auto-generated session retros nobody wants to browse as a tree. The
+// moment the user narrows (types in the rail search, or activates any
+// facet), the rail body drops the hierarchy and shows today's proven
+// ranked list; clearing the narrowing brings the tree back.
+//
+// Compares against each facet's NEUTRAL value, not against the user's
+// persisted preferences: `sort` is deliberately excluded because re-ranking
+// isn't narrowing, and a sort preference that silently killed the tree
+// would be baffling.
+export function shouldFlatten(q: DocsQuery): boolean {
+  return (
+    q.search.trim() !== '' ||
+    q.type !== '' ||
+    q.links !== 'all' ||
+    q.status !== 'active'
+  );
+}
+
+// activeFacetCount is what the facet fold's summary badge reports — how many
+// chips are currently narrowing the list. A collapsed fold must never be
+// able to hide the reason the rail flipped to a flat list. Search is
+// excluded: it has its own always-visible box with its own clear button.
+export function activeFacetCount(q: DocsQuery): number {
+  let n = 0;
+  if (q.type !== '') n++;
+  if (q.links !== 'all') n++;
+  if (q.status !== 'active') n++;
+  return n;
 }

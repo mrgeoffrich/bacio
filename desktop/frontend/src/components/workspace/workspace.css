@@ -1,0 +1,107 @@
+/* Workspace surfacing (pivot Phase 6C).
+ *
+ * A workspace is a pathless, git-less repos row (`repos.kind = 'workspace'`)
+ * that shares the picker, the prefix namespace and the sync mirror with git
+ * repos. These are the only new classes that surfacing needs.
+ *
+ * It lives here rather than in styles/app.css or styles/desktop.css on
+ * purpose: those two sheets are owned by the sibling Kanban / Docs
+ * workstreams this phase. Component-scoped CSS imported from the module
+ * that uses it is an established pattern in this tree (see
+ * components/editor/notion-editor.css), and being imported from a
+ * component puts these rules after the global sheets in the bundle, so
+ * equal-specificity rules resolve in this file's favour.
+ *
+ * Every value is an existing design token — no new colours.
+ */
+
+/* ── Repo picker: kind sections ─────────────────────────────────────── */
+
+/* Section label above each run of same-kind rows. Only rendered once the
+   store actually holds a workspace; a git-only store keeps the flat list
+   it has always had. */
+.mk-repo-picker-group-head {
+  display: block;
+  padding: 8px 10px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  user-select: none;
+}
+.mk-repo-picker-group + .mk-repo-picker-group .mk-repo-picker-group-head {
+  border-top: 1px solid var(--border-1);
+  margin-top: 4px;
+}
+
+/* "Workspace" marker on the closed trigger — once a workspace is
+   selected, the name + prefix alone can't say which kind you are in. */
+.mk-repo-picker-kind {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--border-1);
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+
+/* ── Repo picker: the two-option add footer ─────────────────────────── */
+
+.mk-repo-picker-add-group {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-1);
+}
+/* The buttons keep .mk-repo-picker-add's own styling; the group only
+   needs to stop the first one drawing a second divider. */
+.mk-repo-picker-add-group .mk-repo-picker-add {
+  border-top: none;
+}
+.mk-repo-picker-add-group .mk-repo-picker-add + .mk-repo-picker-add {
+  border-top: 1px solid var(--border-1);
+}
+
+/* ── Sync surfaces ─────────────────────────────────────────────────── */
+
+/* The membership status pill for a workspace member row. Sibling of
+   .mk-status-linked / -phantom / -absent, which live in desktop.css;
+   "workspace" is a neutral fact, not a problem, so it reads muted rather
+   than borrowing the blocked palette a phantom uses. */
+.mk-pill.mk-status-workspace {
+  background: var(--ink-50);
+  color: var(--fg-3);
+}
+
+/* The Sync settings callout shown when the active repo is a workspace.
+   Built from the same tokens as .mk-settings-row so it sits in the pane
+   without looking bolted on. */
+.mk-workspace-sync-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  background: var(--bg-3);
+}
+.mk-workspace-sync-note-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.mk-workspace-sync-note-body {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--fg-3);
+}
+.mk-workspace-sync-note-body + .mk-workspace-sync-note-body {
+  margin-top: 2px;
+}

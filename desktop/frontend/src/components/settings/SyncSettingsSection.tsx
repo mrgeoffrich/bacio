@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import SyncRepoCard from '../SyncRepoCard';
 import SyncSetupModal from '../SyncSetupModal';
 import PhantomLinkModal from '../PhantomLinkModal';
+import WorkspaceSyncNote from '../workspace/WorkspaceSyncNote';
 import { reportError } from '../../errors';
 import * as api from '../../api';
 import type { SyncRegistryDTO, SyncPreferencesDTO, MemberProjectDTO } from '../../api';
@@ -41,7 +42,14 @@ export default function SyncSettingsSection() {
   // BACI-376: used only to mark the active repo's row in the unsynced
   // list — the badge routes here, so the row it's complaining about
   // needs to be findable at a glance.
-  const { activeBoard } = useActiveRepo();
+  //
+  // `boards` is read for one more reason: a workspace never appears in
+  // either list on this pane (it has no working tree to hold a sync
+  // config, and the registry residual skips pathless rows), so arriving
+  // here from a workspace would otherwise show a screen with no mention
+  // of the project you're in. WorkspaceSyncNote says what's true instead.
+  const { activeBoard, boards } = useActiveRepo();
+  const activeWorkspace = boards.find(b => b.prefix === activeBoard && b.kind === 'workspace');
   const [registry, setRegistry] = useState<SyncRegistryDTO | null>(null);
   const [prefs, setPrefs] = useState<SyncPreferencesDTO | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -145,6 +153,8 @@ export default function SyncSettingsSection() {
         </p>
       </header>
 
+      {activeWorkspace && <WorkspaceSyncNote board={activeWorkspace} />}
+
       <section className="mk-settings-row">
         <div className="mk-settings-row-text">
           <div className="mk-settings-label">
@@ -192,7 +202,8 @@ export default function SyncSettingsSection() {
             across machines. Each card shows the projects it carries —
             linked rows are the projects you work in locally; phantom
             rows are projects this sync repo has but you haven&apos;t linked
-            to a local working tree yet.
+            to a local working tree yet; workspace rows have no working
+            tree at all and never will, so there is nothing to link.
           </div>
         </div>
         {!loaded ? (
@@ -221,12 +232,15 @@ export default function SyncSettingsSection() {
             <ScopeChip />
           </div>
           <div className="mk-settings-hint">
-            Project repos this machine tracks that have no sync remote of
+            Git repos this machine tracks that have no sync remote of
             their own. Their data is still mirrored into the sync repos
             above — the export is all-or-nothing — but they can&apos;t
             drive a sync run themselves, so nothing syncs at all until at
             least one project is set up. Set up sync to attach one to an
-            existing sync repo (or initialise a new one).
+            existing sync repo (or initialise a new one). Workspaces are
+            not listed: with no working tree there is nowhere to put a
+            sync config, and they are mirrored by the whole-DB export
+            regardless.
           </div>
         </div>
         {!loaded ? (

@@ -16,6 +16,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { NotionEditor } from './editor/NotionEditor';
 import { isHtmlDoc, isSvgDoc } from '../lib/docFormat';
 import { Archive, ArchiveRestore, Link2, PanelLeftOpen } from 'lucide-react';
+import { DocsBreadcrumbs, DocsPeerJump, DocsPeerNav } from './docs/DocsNav';
+import type { Crumb, Peer } from './docs/DocsNav';
 import type { DocSummary } from '../api';
 
 // One linked-issue / linked-feature row on a DocSummary. Derived from
@@ -44,6 +46,13 @@ type DocsViewerProps = {
   panelsCollapsed: boolean; // BACI-234: rail + list are hidden; render expand button
   onExpandPanels: () => void; // re-open both side panels
   onCancelEdit: () => void; // BACI-293: parent resets the lifted buffer to the loaded doc
+  // The docs-tree pivot: the bare filename in the header became a
+  // space › folder › … › page breadcrumb, and the page grew peer navigation.
+  // `crumbs` ends on the open page; `peerPrev` / `peerNext` are its
+  // neighbours in the rail's render order (null at either end of the tree).
+  crumbs: Crumb[];
+  peerPrev: Peer;
+  peerNext: Peer;
 };
 
 export default function DocsViewer({
@@ -60,6 +69,9 @@ export default function DocsViewer({
   panelsCollapsed, // BACI-234: rail + list are hidden; render expand button
   onExpandPanels,  // () => void — re-open both side panels
   onCancelEdit,    // BACI-293: () => void — parent resets the lifted buffer to the loaded doc
+  crumbs,          // space › folder › … › page trail (pivot)
+  peerPrev,        // previous page in the rail's render order, or null
+  peerNext,        // next page in the rail's render order, or null
 }: DocsViewerProps) {
   const [view, setView] = useState('render');
   // BACI-293: a markdown doc lands read-only; Edit flips this true so the
@@ -137,8 +149,8 @@ export default function DocsViewer({
       type="button"
       className="mk-icbtn mk-docs-panels-expand"
       onClick={onExpandPanels}
-      title="Show filter sidebar and document list"
-      aria-label="Show filter sidebar and document list"
+      title="Show the page tree"
+      aria-label="Show the page tree"
     >
       <PanelLeftOpen size={14} strokeWidth={2} aria-hidden="true" />
     </button>
@@ -173,7 +185,8 @@ export default function DocsViewer({
       <header className="mk-docs-viewer-header">
         {expandButton}
         <div className="mk-docs-viewer-header-meta">
-          <span className="mk-docs-bar-name">{filename}</span>
+          <DocsBreadcrumbs crumbs={crumbs} />
+          <DocsPeerJump prev={peerPrev} next={peerNext} />
           {doc?.type && (
             <span className="mk-docs-item-type">{typeLabel(doc.type)}</span>
           )}
@@ -290,6 +303,10 @@ export default function DocsViewer({
       ) : (
         <div className="mk-docs-editor">
           <NotionEditor content={content || ''} onChange={onContentChange} readOnly={!editMode} />
+          {/* Peer cards ride inside the editor's scroll container so they
+              sit at the END of the document, the moment they're wanted. The
+              header's ‹ › does the same jumps for someone still scanning. */}
+          {!editMode && <DocsPeerNav prev={peerPrev} next={peerNext} />}
         </div>
       )}
     </>
