@@ -14,9 +14,18 @@ const (
 )
 
 type globalOpts struct {
-	output     outputFormat
-	dbPath     string
-	envPath    string // --env: explicit path to a worktree manifest YAML (overrides BACIO_ENV)
+	output  outputFormat
+	dbPath  string
+	envPath string // --env: explicit path to a worktree manifest YAML (overrides BACIO_ENV)
+	// repoPrefix is the --repo selector (falling back to $BACIO_REPO).
+	// It names the repo/workspace every repo-scoped verb operates on,
+	// short-circuiting the cwd → git.Detect resolution. A WORKSPACE has
+	// no working tree at all, so this is the only way to reach one; for
+	// a git repo it is a convenience that lets you drive a repo from
+	// anywhere. It is a SELECTOR, not a mutation payload — hence a
+	// global flag beside --db / --remote / --dry-run and no `--json`
+	// field on any verb.
+	repoPrefix string
 	dryRun     bool
 	remote     string
 	token      string
@@ -52,6 +61,7 @@ func NewRoot() (*cobra.Command, func()) {
 	root.PersistentFlags().VarP(newOutputFlag(&opts.output), "output", "o", "output format: text|json")
 	root.PersistentFlags().StringVar(&opts.dbPath, "db", "", "override database path (default: resolved per-worktree manifest or ~/.bacio/db.sqlite)")
 	root.PersistentFlags().StringVar(&opts.envPath, "env", "", "path to a bacio worktree environment manifest (overrides $BACIO_ENV; takes precedence over a worktree-resolved manifest)")
+	root.PersistentFlags().StringVar(&opts.repoPrefix, "repo", "", "operate on this repo/workspace prefix instead of resolving from the current git working tree; falls back to $BACIO_REPO. Required for workspaces — they have no working tree to detect")
 	root.PersistentFlags().BoolVar(&opts.dryRun, "dry-run", false, "validate the request and emit the projected result without writing to the database (no audit log entry)")
 	root.PersistentFlags().StringVar(&opts.remote, "remote", "", "talk to a bacio api server at this URL instead of the local DB; falls back to BACIO_REMOTE")
 	root.PersistentFlags().StringVar(&opts.token, "token", "", "bearer token for the remote API; falls back to BACIO_API_TOKEN")
@@ -93,6 +103,8 @@ func NewRoot() (*cobra.Command, func()) {
 		newSettingsCmd(),
 		newWorktreeCmd(),
 		newArchiveCmd(),
+		newWorkspaceCmd(),
+		newKanbanCmd(),
 	)
 	return root, stopProfiling
 }

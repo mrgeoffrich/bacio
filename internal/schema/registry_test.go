@@ -53,6 +53,82 @@ func TestRegistryHasMarkDone(t *testing.T) {
 	t.Fatal("issue.mark-done not found in Registry slice")
 }
 
+// TestRegistryHasPivotVerbs locks every mutating verb the workspaces /
+// Kanban / doc-folders pivot added into the schema registry. Agent-CLI
+// rule #2 is "schemas are published at runtime": a verb that accepts
+// --json but has no registry row is invisible to `bacio schema list`
+// and `GET /schema`, so an agent can only discover its payload by
+// reading our source. Each row must also carry a description and a
+// hand-curated worked example (rule #2's "don't autogenerate examples").
+func TestRegistryHasPivotVerbs(t *testing.T) {
+	want := []string{
+		"workspace.add", "workspace.rm",
+		"doc.folder.add", "doc.folder.rename", "doc.folder.mv", "doc.folder.rm",
+		"doc.mv",
+		"kanban.column.add", "kanban.column.rename", "kanban.column.mv",
+		"kanban.column.rm", "kanban.move",
+	}
+	all := All()
+	byName := make(map[string]Entry, len(Registry))
+	for _, e := range Registry {
+		byName[e.Name] = e
+	}
+	for _, name := range want {
+		if _, ok := all[name]; !ok {
+			t.Errorf("schema registry is missing %s", name)
+			continue
+		}
+		e := byName[name]
+		if e.Short == "" {
+			t.Errorf("%s has an empty Short", name)
+		}
+		if e.Example == nil {
+			t.Errorf("%s has no Example", name)
+		}
+	}
+}
+
+// TestPivotDestinationFieldsAreRequired pins the "" -is-a-real-value
+// contract onto the published schemas. `doc.folder.mv.to`,
+// `doc.mv.folder` and `kanban.move.column` all accept the empty string
+// as a MEANINGFUL destination (the tree root / off the board), so they
+// must be advertised as required — an agent that reads the schema and
+// omits the key would otherwise expect a no-op and get a re-root or an
+// off-board sweep. The runners enforce this by checking the decoder's
+// presence map; this test makes sure the published contract agrees.
+func TestPivotDestinationFieldsAreRequired(t *testing.T) {
+	cases := map[string]string{
+		"doc.folder.mv": "to",
+		"doc.mv":        "folder",
+		"kanban.move":   "column",
+	}
+	all := All()
+	for name, field := range cases {
+		s, ok := all[name]
+		if !ok {
+			t.Errorf("schema registry is missing %s", name)
+			continue
+		}
+		if s.Properties == nil {
+			t.Errorf("%s schema has no properties", name)
+			continue
+		}
+		if _, ok := s.Properties.Get(field); !ok {
+			t.Errorf("%s schema is missing the %s property", name, field)
+		}
+		found := false
+		for _, r := range s.Required {
+			if r == field {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s schema does not mark %q required; \"\" is a real destination there, so an omitted key must not read as a no-op", name, field)
+		}
+	}
+}
+
 // TestRegistryIssueSchemasHaveCustomerImpact (BACI-349) locks the new
 // customer_impact field into the published issue.add / issue.edit
 // schemas — `bacio schema show issue.add` and the REST /schema route both

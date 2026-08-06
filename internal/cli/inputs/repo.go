@@ -4,8 +4,15 @@ package inputs
 // equivalent — `bacio init` infers path from CWD, which has no analogue on
 // an HTTP server.
 type RepoCreateInput struct {
-	Prefix    string `json:"prefix,omitempty"`
-	Name      string `json:"name"`
+	Prefix string `json:"prefix,omitempty"`
+	Name   string `json:"name"`
+	// Kind is "git" (the default when absent) or "workspace". A
+	// workspace has no checkout on disk, so `path` and `remote_url` must
+	// be empty for it and are required for a git repo — the two kinds
+	// are genuinely different payloads sharing one route. Callers that
+	// only ever make workspaces should prefer POST /workspaces, which
+	// takes just {name, prefix?}.
+	Kind      string `json:"kind,omitempty"`
 	Path      string `json:"path"`
 	RemoteURL string `json:"remote_url,omitempty"`
 }

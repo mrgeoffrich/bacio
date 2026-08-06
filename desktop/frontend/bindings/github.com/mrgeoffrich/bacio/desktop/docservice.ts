@@ -31,6 +31,52 @@ export function ArchiveDoc(repoPrefix: string, filename: string): $CancellablePr
 }
 
 /**
+ * CreateDoc creates a document and returns it with its (possibly empty)
+ * body, ready for the editor to open on. filename must be a single flat
+ * segment — document filenames stay globally unique per repo and folders
+ * are purely organisational, so '/' is rejected at the store boundary.
+ * 
+ * docType is optional: "" falls back to user_docs. folderUUID files the
+ * new page under a folder; "" leaves it at the tree root. The folder is
+ * applied as a second write (the document create path has no folder
+ * argument), so a bad folder uuid surfaces after the page already
+ * exists — the caller sees the error and the page is at the root.
+ */
+export function CreateDoc(repoPrefix: string, filename: string, docType: string, content: string, folderUUID: string): $CancellablePromise<$models.DocContent> {
+    return $Call.ByID(1105530695, repoPrefix, filename, docType, content, folderUUID).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
+ * CreateDocFolder adds a folder. parentUUID == "" creates it at the tree
+ * root. Sibling names must be unique within one parent; the store
+ * rejects a duplicate rather than silently de-duplicating.
+ */
+export function CreateDocFolder(repoPrefix: string, name: string, parentUUID: string): $CancellablePromise<$models.DocFolderDTO> {
+    return $Call.ByID(3228857299, repoPrefix, name, parentUUID).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
+ * DeleteDoc permanently removes a document and every link pointing at
+ * it. Unlike ArchiveDoc this is not reversible — the caller is expected
+ * to have confirmed with the user first.
+ */
+export function DeleteDoc(repoPrefix: string, filename: string): $CancellablePromise<void> {
+    return $Call.ByID(4258644254, repoPrefix, filename);
+}
+
+/**
+ * DeleteDocFolder removes a folder for real. Descendant folders go with
+ * it; every document in that subtree is re-rooted rather than deleted.
+ */
+export function DeleteDocFolder(repoPrefix: string, uuid: string): $CancellablePromise<void> {
+    return $Call.ByID(217190382, repoPrefix, uuid);
+}
+
+/**
  * GetDoc returns one document with its markdown content for editing.
  */
 export function GetDoc(repoPrefix: string, filename: string): $CancellablePromise<$models.DocContent> {
@@ -40,12 +86,82 @@ export function GetDoc(repoPrefix: string, filename: string): $CancellablePromis
 }
 
 /**
+ * ListDocFolders returns EVERY folder in the repo, not just the roots —
+ * the docs rail assembles the tree client-side from the flat list, and a
+ * full list is also what makes a display path ("Design/API/Auth")
+ * derivable without a round trip per level.
+ */
+export function ListDocFolders(repoPrefix: string): $CancellablePromise<$models.DocFolderDTO[]> {
+    return $Call.ByID(3189276808, repoPrefix).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+/**
  * ListDocs returns every document in one repo as a summary row. typeFilter is
  * a document-type string ("architecture", "designs", …) or "" for all types.
  */
 export function ListDocs(repoPrefix: string, typeFilter: string): $CancellablePromise<$models.DocSummary[]> {
     return $Call.ByID(2525044932, repoPrefix, typeFilter).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType4($result);
+    });
+}
+
+/**
+ * MoveDocFolder re-parents a folder and its whole subtree.
+ * newParentUUID == "" re-roots it. The store refuses a move into the
+ * folder's own descendant and a move that would breach the depth cap.
+ */
+export function MoveDocFolder(repoPrefix: string, uuid: string, newParentUUID: string): $CancellablePromise<$models.DocFolderDTO> {
+    return $Call.ByID(3688591952, repoPrefix, uuid, newParentUUID).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
+ * MoveDocToFolder files a document under a folder. folderUUID == ""
+ * moves it back to the tree root — the root is not a folder, so "" is a
+ * meaningful destination rather than a missing argument.
+ * 
+ * position is the sort key inside the target folder; pass null to append
+ * after the folder's current members. It is a sort key, NOT a dense
+ * index — siblings may share one and the listing tie-breaks on filename.
+ */
+export function MoveDocToFolder(repoPrefix: string, filename: string, folderUUID: string, position: number | null): $CancellablePromise<void> {
+    return $Call.ByID(2814611525, repoPrefix, filename, folderUUID, position);
+}
+
+/**
+ * PreviewDeleteDocFolder reports what a delete would take with it,
+ * WITHOUT deleting anything — the dry-run behind the confirmation
+ * dialog. Pairs with DeleteDocFolder, which does the real write.
+ */
+export function PreviewDeleteDocFolder(repoPrefix: string, uuid: string): $CancellablePromise<$models.DocFolderDeletePreviewDTO> {
+    return $Call.ByID(503757344, repoPrefix, uuid).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
+
+/**
+ * RenameDoc renames a document in place and returns the refreshed
+ * content payload under its new name. The folder membership, links and
+ * body are untouched — a rename is purely the filename.
+ */
+export function RenameDoc(repoPrefix: string, filename: string, newFilename: string): $CancellablePromise<$models.DocContent> {
+    return $Call.ByID(2911768049, repoPrefix, filename, newFilename).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
+ * RenameDocFolder renames a folder in place; its parent, children and
+ * documents are all untouched. Because record folders on disk are keyed
+ * by uuid, a rename is a pure content change to the sync layer — no
+ * rename detection, no redirects.
+ */
+export function RenameDocFolder(repoPrefix: string, uuid: string, newName: string): $CancellablePromise<$models.DocFolderDTO> {
+    return $Call.ByID(2267210417, repoPrefix, uuid, newName).then(($result: any) => {
+        return $$createType1($result);
     });
 }
 
@@ -65,5 +181,8 @@ export function UnarchiveDoc(repoPrefix: string, filename: string): $Cancellable
 
 // Private type creation functions
 const $$createType0 = $models.DocContent.createFrom;
-const $$createType1 = $models.DocSummary.createFrom;
+const $$createType1 = $models.DocFolderDTO.createFrom;
 const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = $models.DocSummary.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = $models.DocFolderDeletePreviewDTO.createFrom;

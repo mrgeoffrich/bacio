@@ -97,15 +97,24 @@ func syncStatusForRepo(s *store.Store, repo *model.Repo, bgEnabled, inProgress b
 		BackgroundEnabled: bgEnabled,
 	}
 	// BACI-376: coverage is independent of this repo's own config — a
-	// phantom (path == "") or a never-configured project is mirrored
-	// all the same, so this runs before the config-file checks below.
+	// pathless row (phantom or workspace) or a never-configured project
+	// is mirrored all the same, so this runs before the config-file
+	// checks below. It is the only sync signal a workspace ever gets,
+	// and it is an honest one: the export is whole-DB, so a workspace's
+	// issues, pages and folders really are mirrored the moment any git
+	// repo on this machine drives a tick.
 	if src, ok := coverage[repo.Prefix]; ok {
 		out.MirroredBy = src.Label
 		out.InProgress = inProgress
 		out.LastSyncAt = src.LastSyncAt
 		out.LastError = src.LastError
 	}
-	if repo.Path == "" {
+	// No working tree, no .bacio/config.yaml to read — true for a
+	// phantom (the checkout is on another machine) and for a workspace
+	// (there is no checkout anywhere, ever). Both stay Configured:false,
+	// which is exactly right: neither can DRIVE a tick. Per-workspace
+	// sync config is deliberately out of scope this pass.
+	if !repo.HasWorkingTree() {
 		return out
 	}
 	cfg, err := bsync.ReadProjectConfig(repo.Path)
@@ -304,16 +313,24 @@ type MemberProjectOut struct {
 	Name string `json:"name"`
 	// UUID is the local repo's UUID, empty for absent entries.
 	UUID string `json:"uuid,omitempty"`
-	// Status is one of "linked", "phantom", "absent" — mirrors
-	// sync.MembershipStatus.
+	// Status is one of "linked", "phantom", "workspace", "absent" —
+	// mirrors sync.MembershipStatus verbatim (the handler string-casts
+	// it, so a new member of that enum reaches the wire without a change
+	// here — but a consumer switching on this field needs to know the
+	// full set). "workspace" is a pathless row like "phantom" but is not
+	// one: it has no checkout anywhere and can never be linked.
 	Status string `json:"status"`
 }
 
 // UnsyncedProjectOut is one entry in SyncRegistryOut.UnsyncedProjects:
 // a tracked project repo (non-empty path) that doesn't yet have a
 // `sync.remote` in its .bacio/config.yaml, or whose remote isn't in the
-// registry. Phantom rows (path == "") are excluded — they're already
-// surfaced under their sync repo's Projects.
+// registry. Pathless rows are excluded — phantoms because they're
+// already surfaced under their sync repo's Projects, workspaces for the
+// same reason plus the fact that they can never hold a sync config of
+// their own. sync.BuildRegistry owns that filter (it counts every
+// linked / phantom / workspace member as accounted for), so there is no
+// second copy of the rule here.
 type UnsyncedProjectOut struct {
 	Prefix string `json:"prefix"`
 	Name   string `json:"name"`
@@ -414,13 +431,20 @@ func (d deps) handleSyncSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A phantom (path=="") has no working tree; we can't write its
-	// .bacio/config.yaml. Surface the explicit reason rather than
-	// letting the engine fail deep with a misleading "not a git repo"
-	// error.
-	if repo.Path == "" {
-		writeError(w, http.StatusBadRequest, "invalid_input",
-			"repo has no local working tree (phantom); link it via POST /repos/{prefix}/link first",
+	// No working tree means no .bacio/config.yaml to write. Both pathless
+	// kinds land here, and they need DIFFERENT messages: a phantom's
+	// checkout exists on another machine and linking one is the fix,
+	// whereas a workspace has no checkout anywhere and never will —
+	// sending its owner off to "link it first" would be a wild goose
+	// chase. Surface the explicit reason either way rather than letting
+	// the engine fail deep with a misleading "not a git repo".
+	if !repo.HasWorkingTree() {
+		msg := "repo has no local working tree (phantom); link it via POST /repos/{prefix}/link first"
+		if repo.IsWorkspace() {
+			msg = repo.Prefix + " is a workspace, not a git repo — it has no working tree to hold a sync config. " +
+				"Its issues, pages and folders are mirrored anyway once any git repo on this machine syncs."
+		}
+		writeError(w, http.StatusBadRequest, "invalid_input", msg,
 			map[string]any{"field": "prefix"})
 		return
 	}

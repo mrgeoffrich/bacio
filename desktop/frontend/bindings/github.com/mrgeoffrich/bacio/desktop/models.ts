@@ -118,6 +118,17 @@ export class AudioPreferencesDTO {
 export class Board {
     "prefix": string;
     "name": string;
+
+    /**
+     * Kind is the repos.kind discriminator — "git" for a repo backed by
+     * a working tree, "workspace" for a manual, pathless one. The React
+     * tree reads it to hide the Agentic Pipeline nav entry on a
+     * workspace (there is no worktree, so a dispatched agent would have
+     * nowhere to work) and to group the repository picker by kind.
+     * Legacy rows with an empty kind normalise to "git" here, so the
+     * field is never blank on the wire.
+     */
+    "kind": string;
     "issueCount": number;
     "syncEnabled": boolean;
     "syncBackgroundEnabled": boolean;
@@ -133,6 +144,9 @@ export class Board {
         }
         if (!("name" in $$source)) {
             this["name"] = "";
+        }
+        if (!("kind" in $$source)) {
+            this["kind"] = "";
         }
         if (!("issueCount" in $$source)) {
             this["issueCount"] = 0;
@@ -471,6 +485,101 @@ export class DocContent {
 }
 
 /**
+ * DocFolderDTO is one node of the Confluence-style document tree, shaped
+ * for the desktop docs rail. The tree is flat on the wire — every folder
+ * in the repo, each naming its parent — and the React side assembles it;
+ * that is exactly what ListDocFolders on the client returns.
+ * 
+ * ParentUUID == "" means the tree ROOT. The root is not itself a folder,
+ * so "" is unambiguous rather than a missing value, and the field
+ * deliberately carries no omitempty so the distinction survives JSON.
+ */
+export class DocFolderDTO {
+    "uuid": string;
+    "name": string;
+    "parentUuid": string;
+    "position": number;
+    "createdAt": time$0.Time;
+    "updatedAt": time$0.Time;
+
+    /** Creates a new DocFolderDTO instance. */
+    constructor($$source: Partial<DocFolderDTO> = {}) {
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("parentUuid" in $$source)) {
+            this["parentUuid"] = "";
+        }
+        if (!("position" in $$source)) {
+            this["position"] = 0;
+        }
+        if (!("createdAt" in $$source)) {
+            this["createdAt"] = null;
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DocFolderDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DocFolderDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DocFolderDTO($$parsedSource as Partial<DocFolderDTO>);
+    }
+}
+
+/**
+ * DocFolderDeletePreviewDTO is the blast radius of deleting a folder,
+ * for the confirmation dialog. Subfolders is the number of DESCENDANT
+ * folders that go with it; DocumentsReRooted is the number of pages in
+ * that whole subtree that get moved back to the tree root — a folder
+ * delete never destroys a page.
+ */
+export class DocFolderDeletePreviewDTO {
+    "uuid": string;
+    "name": string;
+    "path": string;
+    "subfolders": number;
+    "documentsReRooted": number;
+
+    /** Creates a new DocFolderDeletePreviewDTO instance. */
+    constructor($$source: Partial<DocFolderDeletePreviewDTO> = {}) {
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("subfolders" in $$source)) {
+            this["subfolders"] = 0;
+        }
+        if (!("documentsReRooted" in $$source)) {
+            this["documentsReRooted"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DocFolderDeletePreviewDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DocFolderDeletePreviewDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DocFolderDeletePreviewDTO($$parsedSource as Partial<DocFolderDeletePreviewDTO>);
+    }
+}
+
+/**
  * DocLinkDTO is one document linked to an issue, shaped for the drawer's
  * attachments section.
  */
@@ -526,6 +635,24 @@ export class DocSummary {
     "snippet"?: string;
     "links"?: DocSummaryLinkDTO[];
 
+    /**
+     * FolderUUID is the doc-folder this page is filed under, or "" for
+     * the tree root. Addressed by **uuid**, never the folder's int64 id:
+     * uuid is the only folder identity that survives a sync round trip,
+     * and every folder mutator on this service takes a uuid. "" is a
+     * meaningful value (the root is not itself a folder), so the field
+     * carries no omitempty.
+     */
+    "folderUuid": string;
+
+    /**
+     * FolderPosition is the page's sort key inside its folder. It is a
+     * SORT KEY, not a dense index — siblings may share one and the
+     * listing tie-breaks on filename, so every pre-pivot document sitting
+     * at 0 keeps its historical alphabetical order.
+     */
+    "folderPosition": number;
+
     /** Creates a new DocSummary instance. */
     constructor($$source: Partial<DocSummary> = {}) {
         if (!("filename" in $$source)) {
@@ -542,6 +669,12 @@ export class DocSummary {
         }
         if (!("createdAt" in $$source)) {
             this["createdAt"] = null;
+        }
+        if (!("folderUuid" in $$source)) {
+            this["folderUuid"] = "";
+        }
+        if (!("folderPosition" in $$source)) {
+            this["folderPosition"] = 0;
         }
 
         Object.assign(this, $$source);
@@ -1546,6 +1679,114 @@ export class JobTranscriptUsageDTO {
 }
 
 /**
+ * KanbanCardRefDTO is one card's membership of a lane: the issue key
+ * plus its 0-based slot. Deliberately a *reference*, not a card — the
+ * React side already holds the full BoardCard rows from ListCards and
+ * joins them by key, so lane membership costs one small array rather
+ * than a second copy of every card payload.
+ */
+export class KanbanCardRefDTO {
+    "key": string;
+    "position": number;
+
+    /** Creates a new KanbanCardRefDTO instance. */
+    constructor($$source: Partial<KanbanCardRefDTO> = {}) {
+        if (!("key" in $$source)) {
+            this["key"] = "";
+        }
+        if (!("position" in $$source)) {
+            this["position"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new KanbanCardRefDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): KanbanCardRefDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new KanbanCardRefDTO($$parsedSource as Partial<KanbanCardRefDTO>);
+    }
+}
+
+/**
+ * KanbanColumnDTO is one lane plus its ordered card references. Cards is
+ * always non-nil (an empty lane serialises as []) so the React side can
+ * map over it without a guard.
+ */
+export class KanbanColumnDTO {
+    "uuid": string;
+    "name": string;
+    "position": number;
+    "cards": KanbanCardRefDTO[];
+
+    /** Creates a new KanbanColumnDTO instance. */
+    constructor($$source: Partial<KanbanColumnDTO> = {}) {
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("position" in $$source)) {
+            this["position"] = 0;
+        }
+        if (!("cards" in $$source)) {
+            this["cards"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new KanbanColumnDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): KanbanColumnDTO {
+        const $$createField3_0 = $$createType37;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("cards" in $$parsedSource) {
+            $$parsedSource["cards"] = $$createField3_0($$parsedSource["cards"]);
+        }
+        return new KanbanColumnDTO($$parsedSource as Partial<KanbanColumnDTO>);
+    }
+}
+
+/**
+ * KanbanColumnDeletePreviewDTO is the blast radius of deleting a lane:
+ * the cards it holds come OFF the board (kanban_column_id back to NULL).
+ * The issues themselves are never deleted.
+ */
+export class KanbanColumnDeletePreviewDTO {
+    "uuid": string;
+    "name": string;
+    "issuesRemovedFromBoard": number;
+
+    /** Creates a new KanbanColumnDeletePreviewDTO instance. */
+    constructor($$source: Partial<KanbanColumnDeletePreviewDTO> = {}) {
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("issuesRemovedFromBoard" in $$source)) {
+            this["issuesRemovedFromBoard"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new KanbanColumnDeletePreviewDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): KanbanColumnDeletePreviewDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new KanbanColumnDeletePreviewDTO($$parsedSource as Partial<KanbanColumnDeletePreviewDTO>);
+    }
+}
+
+/**
  * LatestPlanDTO (BACI-216) is the Wails-side mirror of
  * model.LatestPlan — the newest `plan`-typed doc linked directly to
  * an issue. Carries enough metadata (filename, uuid, updated_at) for
@@ -2016,8 +2257,8 @@ export class RelationsDTO {
      * Creates a new RelationsDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): RelationsDTO {
-        const $$createField0_0 = $$createType37;
-        const $$createField1_0 = $$createType37;
+        const $$createField0_0 = $$createType39;
+        const $$createField1_0 = $$createType39;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("outgoing" in $$parsedSource) {
             $$parsedSource["outgoing"] = $$createField0_0($$parsedSource["outgoing"]);
@@ -2285,7 +2526,7 @@ export class ShippedListDTO {
      * Creates a new ShippedListDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): ShippedListDTO {
-        const $$createField0_0 = $$createType39;
+        const $$createField0_0 = $$createType41;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("rows" in $$parsedSource) {
             $$parsedSource["rows"] = $$createField0_0($$parsedSource["rows"]);
@@ -2347,8 +2588,8 @@ export class SyncRegistryDTO {
      * Creates a new SyncRegistryDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRegistryDTO {
-        const $$createField0_0 = $$createType41;
-        const $$createField1_0 = $$createType43;
+        const $$createField0_0 = $$createType43;
+        const $$createField1_0 = $$createType45;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("syncRepos" in $$parsedSource) {
             $$parsedSource["syncRepos"] = $$createField0_0($$parsedSource["syncRepos"]);
@@ -2401,7 +2642,7 @@ export class SyncRepoDTO {
      * Creates a new SyncRepoDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRepoDTO {
-        const $$createField7_0 = $$createType45;
+        const $$createField7_0 = $$createType47;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("projects" in $$parsedSource) {
             $$parsedSource["projects"] = $$createField7_0($$parsedSource["projects"]);
@@ -2462,7 +2703,7 @@ export class SyncSetupDTO {
      * Creates a new SyncSetupDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncSetupDTO {
-        const $$createField6_0 = $$createType47;
+        const $$createField6_0 = $$createType49;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("previewCollisions" in $$parsedSource) {
             $$parsedSource["previewCollisions"] = $$createField6_0($$parsedSource["previewCollisions"]);
@@ -2571,15 +2812,17 @@ const $$createType32 = $Create.Nullable($$createType31);
 const $$createType33 = DocLinkDTO.createFrom;
 const $$createType34 = $Create.Array($$createType33);
 const $$createType35 = JobTranscriptUsageDTO.createFrom;
-const $$createType36 = RelationDTO.createFrom;
+const $$createType36 = KanbanCardRefDTO.createFrom;
 const $$createType37 = $Create.Array($$createType36);
-const $$createType38 = ShippedIssueDTO.createFrom;
+const $$createType38 = RelationDTO.createFrom;
 const $$createType39 = $Create.Array($$createType38);
-const $$createType40 = SyncRepoDTO.createFrom;
+const $$createType40 = ShippedIssueDTO.createFrom;
 const $$createType41 = $Create.Array($$createType40);
-const $$createType42 = UnsyncedProjectDTO.createFrom;
+const $$createType42 = SyncRepoDTO.createFrom;
 const $$createType43 = $Create.Array($$createType42);
-const $$createType44 = MemberProjectDTO.createFrom;
+const $$createType44 = UnsyncedProjectDTO.createFrom;
 const $$createType45 = $Create.Array($$createType44);
-const $$createType46 = CollisionPreviewDTO.createFrom;
-const $$createType47 = $Create.Nullable($$createType46);
+const $$createType46 = MemberProjectDTO.createFrom;
+const $$createType47 = $Create.Array($$createType46);
+const $$createType48 = CollisionPreviewDTO.createFrom;
+const $$createType49 = $Create.Nullable($$createType48);

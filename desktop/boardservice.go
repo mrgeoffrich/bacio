@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/user"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,8 +51,16 @@ func stateLabel(s model.State) string {
 // the export is whole-DB) is routinely set for repos that have no sync
 // config of their own.
 type Board struct {
-	Prefix                string     `json:"prefix"`
-	Name                  string     `json:"name"`
+	Prefix string `json:"prefix"`
+	Name   string `json:"name"`
+	// Kind is the repos.kind discriminator — "git" for a repo backed by
+	// a working tree, "workspace" for a manual, pathless one. The React
+	// tree reads it to hide the Agentic Pipeline nav entry on a
+	// workspace (there is no worktree, so a dispatched agent would have
+	// nowhere to work) and to group the repository picker by kind.
+	// Legacy rows with an empty kind normalise to "git" here, so the
+	// field is never blank on the wire.
+	Kind                  string     `json:"kind"`
 	IssueCount            int        `json:"issueCount"`
 	SyncEnabled           bool       `json:"syncEnabled"`
 	SyncBackgroundEnabled bool       `json:"syncBackgroundEnabled"`
@@ -429,9 +438,18 @@ func (b *BoardService) ListBoards() ([]Board, error) {
 // repo's sync status. Centralises the SyncEnabled / Sync* mapping so
 // ListBoards and AddRepository stay in lockstep.
 func boardWithSync(r *model.Repo, issueCount int, st client.SyncStatus) Board {
+	// A repo row written before the kind column existed scans as "git"
+	// at the store boundary, but a *model.Repo constructed in Go can
+	// still carry the zero value — normalise so the frontend's
+	// 'git' | 'workspace' union is total.
+	kind := string(r.Kind)
+	if kind == "" {
+		kind = string(model.RepoKindGit)
+	}
 	bd := Board{
 		Prefix:                r.Prefix,
 		Name:                  r.Name,
+		Kind:                  kind,
 		IssueCount:            issueCount,
 		SyncEnabled:           st.Configured,
 		SyncBackgroundEnabled: st.BackgroundEnabled,
@@ -498,6 +516,46 @@ func (b *BoardService) AddRepository() (Board, error) {
 	// Freshly-added repo: sync is almost never configured yet, but
 	// look it up anyway so an add-after-`bacio sync init` reflects
 	// reality. A failure is non-fatal — fall back to the zero status.
+	var st client.SyncStatus
+	if statuses, serr := b.client.SyncStatuses(ctx); serr == nil {
+		for _, s := range statuses {
+			if s.Prefix == repo.Prefix {
+				st = s
+				break
+			}
+		}
+	}
+	return boardWithSync(repo, len(issues), st), nil
+}
+
+// AddWorkspace registers a manual workspace — a repo row with
+// kind='workspace', no path and no remote — and returns it as a Board.
+//
+// It deliberately does NOT go through AddRepository's folder picker or
+// git.Detect: a workspace has no directory at all, so the "%q is not
+// inside a git repository" refusal that guards the git path is exactly
+// the wrong check here. name is required; prefix is optional — empty
+// allocates one from the name through the same AllocatePrefix machinery
+// a git registration uses, so workspaces and git repos share one prefix
+// namespace. The store bootstraps the mandatory catch-all features and
+// the starter Kanban lanes as part of the insert.
+func (b *BoardService) AddWorkspace(name, prefix string) (Board, error) {
+	ctx := context.Background()
+	repo, err := b.client.CreateWorkspace(ctx, client.WorkspaceCreateInput{
+		Name:   name,
+		Prefix: prefix,
+	}, false)
+	if err != nil {
+		return Board{}, err
+	}
+	issues, err := b.client.ListIssues(ctx, client.IssueFilter{Repo: repo})
+	if err != nil {
+		return Board{}, err
+	}
+	// A workspace can't drive a sync tick of its own, but it IS mirrored
+	// for free by the whole-DB export any git repo drives — so read the
+	// status rather than assuming a zero one, and the badge can report
+	// "mirrored by" straight away. Non-fatal on failure.
 	var st client.SyncStatus
 	if statuses, serr := b.client.SyncStatuses(ctx); serr == nil {
 		for _, s := range statuses {
@@ -1658,4 +1716,248 @@ func (b *BoardService) SetBoardHiddenStates(repoPrefix string, states []string) 
 		out = []string{}
 	}
 	return BoardHiddenStatesDTO{States: out}, nil
+}
+
+// ---------------------------------------------------------------------
+// Kanban lanes — the human board, orthogonal to model.State.
+//
+// A card is on the Kanban iff its kanban_column_id is non-NULL. That
+// NULL is what stops the Kanban and the Agentic Pipeline double-
+// rendering the same `todo` card: a git repo's issues start OFF the
+// board and are opted in explicitly, while a workspace's issues default
+// onto the first lane at create time.
+//
+// Lanes are addressed by **uuid**, never their int64 id — uuid is the
+// only lane identity that survives a sync round trip. NOTE the naming:
+// the pre-existing BoardColumn / ListColumns pair is the legacy
+// state-keyed board and is deliberately left alone (the per-repo
+// settings pane still consumes it). Everything below is KanbanColumn.
+// ---------------------------------------------------------------------
+
+// KanbanCardRefDTO is one card's membership of a lane: the issue key
+// plus its 0-based slot. Deliberately a *reference*, not a card — the
+// React side already holds the full BoardCard rows from ListCards and
+// joins them by key, so lane membership costs one small array rather
+// than a second copy of every card payload.
+type KanbanCardRefDTO struct {
+	Key      string `json:"key"`
+	Position int    `json:"position"`
+}
+
+// KanbanColumnDTO is one lane plus its ordered card references. Cards is
+// always non-nil (an empty lane serialises as []) so the React side can
+// map over it without a guard.
+type KanbanColumnDTO struct {
+	UUID     string             `json:"uuid"`
+	Name     string             `json:"name"`
+	Position int                `json:"position"`
+	Cards    []KanbanCardRefDTO `json:"cards"`
+}
+
+// KanbanColumnDeletePreviewDTO is the blast radius of deleting a lane:
+// the cards it holds come OFF the board (kanban_column_id back to NULL).
+// The issues themselves are never deleted.
+type KanbanColumnDeletePreviewDTO struct {
+	UUID                   string `json:"uuid"`
+	Name                   string `json:"name"`
+	IssuesRemovedFromBoard int    `json:"issuesRemovedFromBoard"`
+}
+
+// requireRepo resolves a concrete repo, rejecting the empty / "all"
+// pseudo-board. Kanban lanes are per-repo, so unlike ListCards there is
+// no meaningful cross-repo board to assemble.
+func (b *BoardService) requireRepo(ctx context.Context, repoPrefix string) (*model.Repo, error) {
+	if repoPrefix == "" || repoPrefix == "all" {
+		return nil, fmt.Errorf("select a repository to view its Kanban board")
+	}
+	return b.client.GetRepoByPrefix(ctx, repoPrefix)
+}
+
+// kanbanBoard assembles the lanes with their ordered membership. It
+// applies the same two visibility filters ListCards does — the
+// display.show_archived global and the per-repo hidden-feature set — so
+// a lane never references a card the board didn't ship.
+func (b *BoardService) kanbanBoard(ctx context.Context, repo *model.Repo) ([]KanbanColumnDTO, error) {
+	cols, err := b.client.ListKanbanColumns(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	showArchived, _ := b.client.GetDisplayShowArchived(ctx)
+	var hiddenSlugs []string
+	if slugs, herr := b.client.ListHiddenFeatureSlugs(ctx, repo); herr == nil {
+		hiddenSlugs = slugs
+	}
+	issues, err := b.client.ListIssues(ctx, client.IssueFilter{
+		Repo:               repo,
+		IncludeArchived:    showArchived,
+		HiddenFeatureSlugs: hiddenSlugs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	byColumn := make(map[int64][]KanbanCardRefDTO, len(cols))
+	for _, iss := range issues {
+		if iss.KanbanColumnID == nil {
+			continue // not on the board
+		}
+		id := *iss.KanbanColumnID
+		byColumn[id] = append(byColumn[id], KanbanCardRefDTO{
+			Key:      iss.Key,
+			Position: iss.KanbanPosition,
+		})
+	}
+	out := make([]KanbanColumnDTO, 0, len(cols))
+	for _, c := range cols {
+		refs := byColumn[c.ID]
+		// Kanban positions are a DENSE 0-based index maintained by the
+		// store, but sorting here keeps the lane stable even if an older
+		// binary left a gap.
+		sort.SliceStable(refs, func(i, j int) bool { return refs[i].Position < refs[j].Position })
+		if refs == nil {
+			refs = []KanbanCardRefDTO{}
+		}
+		out = append(out, KanbanColumnDTO{
+			UUID:     c.UUID,
+			Name:     c.Name,
+			Position: c.Position,
+			Cards:    refs,
+		})
+	}
+	return out, nil
+}
+
+func pickKanbanColumn(cols []KanbanColumnDTO, uuid string) (KanbanColumnDTO, error) {
+	for _, c := range cols {
+		if c.UUID == uuid {
+			return c, nil
+		}
+	}
+	return KanbanColumnDTO{}, fmt.Errorf("kanban column %s not found after write", uuid)
+}
+
+// ListKanbanColumns returns the repo's lanes in board order, each with
+// its ordered card references.
+func (b *BoardService) ListKanbanColumns(repoPrefix string) ([]KanbanColumnDTO, error) {
+	ctx := context.Background()
+	repo, err := b.requireRepo(ctx, repoPrefix)
+	if err != nil {
+		return nil, err
+	}
+	return b.kanbanBoard(ctx, repo)
+}
+
+// CreateKanbanColumn appends a lane to the right-hand end of the board.
+func (b *BoardService) CreateKanbanColumn(repoPrefix, name string) (KanbanColumnDTO, error) {
+	ctx := context.Background()
+	repo, err := b.requireRepo(ctx, repoPrefix)
+	if err != nil {
+		return KanbanColumnDTO{}, err
+	}
+	col, err := b.client.CreateKanbanColumn(ctx, repo, name, false)
+	if err != nil {
+		return KanbanColumnDTO{}, err
+	}
+	cols, err := b.kanbanBoard(ctx, repo)
+	if err != nil {
+		return KanbanColumnDTO{}, err
+	}
+	return pickKanbanColumn(cols, col.UUID)
+}
+
+// RenameKanbanColumn renames a lane in place; its position and cards are
+// untouched.
+func (b *BoardService) RenameKanbanColumn(repoPrefix, uuid, newName string) (KanbanColumnDTO, error) {
+	ctx := context.Background()
+	repo, err := b.requireRepo(ctx, repoPrefix)
+	if err != nil {
+		return KanbanColumnDTO{}, err
+	}
+	if _, err := b.client.RenameKanbanColumn(ctx, repo, uuid, newName, false); err != nil {
+		return KanbanColumnDTO{}, err
+	}
+	cols, err := b.kanbanBoard(ctx, repo)
+	if err != nil {
+		return KanbanColumnDTO{}, err
+	}
+	return pickKanbanColumn(cols, uuid)
+}
+
+// ReorderKanbanColumn moves a lane to `position` (0-based, clamped to
+// the board). It returns the WHOLE refreshed board rather than the moved
+// lane: the siblings re-densify underneath, so any caller rendering
+// board order has to re-read them anyway.
+func (b *BoardService) ReorderKanbanColumn(repoPrefix, uuid string, position int) ([]KanbanColumnDTO, error) {
+	ctx := context.Background()
+	repo, err := b.requireRepo(ctx, repoPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := b.client.ReorderKanbanColumn(ctx, repo, uuid, position, false); err != nil {
+		return nil, err
+	}
+	return b.kanbanBoard(ctx, repo)
+}
+
+// PreviewDeleteKanbanColumn reports how many cards a lane delete would
+// take off the board, WITHOUT deleting anything — the dry-run behind the
+// confirmation dialog. Pairs with DeleteKanbanColumn.
+func (b *BoardService) PreviewDeleteKanbanColumn(repoPrefix, uuid string) (KanbanColumnDeletePreviewDTO, error) {
+	ctx := context.Background()
+	repo, err := b.requireRepo(ctx, repoPrefix)
+	if err != nil {
+		return KanbanColumnDeletePreviewDTO{}, err
+	}
+	_, preview, err := b.client.DeleteKanbanColumn(ctx, repo, uuid, true)
+	if err != nil {
+		return KanbanColumnDeletePreviewDTO{}, err
+	}
+	if preview == nil || preview.Column == nil {
+		return KanbanColumnDeletePreviewDTO{}, fmt.Errorf("kanban column %s: no delete preview returned", uuid)
+	}
+	return KanbanColumnDeletePreviewDTO{
+		UUID:                   preview.Column.UUID,
+		Name:                   preview.Column.Name,
+		IssuesRemovedFromBoard: preview.Cascade.IssuesRemovedFromBoard,
+	}, nil
+}
+
+// DeleteKanbanColumn removes a lane for real and takes its cards off the
+// board (the issues themselves survive). Returns the refreshed board.
+func (b *BoardService) DeleteKanbanColumn(repoPrefix, uuid string) ([]KanbanColumnDTO, error) {
+	ctx := context.Background()
+	repo, err := b.requireRepo(ctx, repoPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := b.client.DeleteKanbanColumn(ctx, repo, uuid, false); err != nil {
+		return nil, err
+	}
+	return b.kanbanBoard(ctx, repo)
+}
+
+// SetIssueKanbanColumn places a card on the Kanban — the drag-drop
+// write. columnUUID == "" takes the card OFF the board entirely; that
+// empty string is the only way to un-opt a git-repo card, so it is a
+// meaningful value rather than a missing argument.
+//
+// position is the 0-based top-to-bottom slot in the target lane; pass
+// null to append to the end. Both the source and the target lane
+// re-densify to 0..n-1 around the move, so this returns the WHOLE
+// refreshed board rather than the moved card — the card DTO has nowhere
+// to carry a lane, and the caller needs the neighbours' new slots
+// regardless.
+func (b *BoardService) SetIssueKanbanColumn(repoPrefix, key, columnUUID string, position *int) ([]KanbanColumnDTO, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := b.client.MoveIssueToKanbanColumn(ctx, repo, client.IssueKanbanMoveInput{
+		IssueKey:   key,
+		ColumnUUID: columnUUID,
+		Position:   position,
+	}, false); err != nil {
+		return nil, err
+	}
+	return b.kanbanBoard(ctx, repo)
 }
