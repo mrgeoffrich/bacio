@@ -11,9 +11,11 @@ Inspect and manage the repos bacio knows about. Repos auto-register when you fir
 
 | Subcommand | What it does |
 |---|---|
-| `bacio repo list` | List every tracked repo with its prefix, name, path, and remote. |
+| `bacio repo list` | List every tracked project with its prefix, name, `kind`, path, and remote. |
 | `bacio repo show [PREFIX]` | Show full detail for one repo. Defaults to the repo of the current working directory. |
 | `bacio repo rm [PREFIX]` | Remove a repo binding from the global DB. **Destructive** — see notes below. |
+
+`bacio repo list` covers both project kinds: `git` repos and [workspaces](/concepts/workspaces). Filter to just the latter with [`bacio workspace list`](/reference/cli/workspace). `bacio repo rm` will delete either kind; `bacio workspace rm` is the narrowed version that refuses a git repo, so prefer it when you mean a workspace.
 
 ## `bacio repo rm` — the destructive one
 

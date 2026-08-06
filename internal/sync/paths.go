@@ -161,7 +161,9 @@ func RepoYAMLFile(prefix string) string {
 //
 // and an older binary's scanners only ever read repo.yaml plus the
 // features/ issues/ docs/ subdirs, so the new siblings are never read,
-// rewritten or deleted by it. Pinned by TestOldBinaryNeverDeletesPivotPaths.
+// rewritten or deleted by it. Pinned by TestLegacyRecordFolderOfIgnoresPivotPaths
+// (internal/sync/pivot_backcompat_test.go), which runs a verbatim frozen copy
+// of the pre-pivot recordFolderOf against every path above.
 //
 // The folder segment for both container kinds is the record's UUID, not
 // a human label. A label would be renameable, which would need rename

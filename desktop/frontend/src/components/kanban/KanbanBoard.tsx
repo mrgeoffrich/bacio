@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { UIEvent } from 'react';
+import { Plus } from 'lucide-react';
 import KanbanLane from './KanbanLane';
+import LaneDeleteDialog from './LaneDeleteDialog';
+import LaneNameDialog from './LaneNameDialog';
 import { useCollapsedColumns } from './boardCollapsePersistence';
 import { useCompactColumns } from './boardCompactPersistence';
 import { persistKanbanScroll, readKanbanScroll } from './kanbanPersistence';
+import { laneShiftTarget, moveLaneTo } from './kanbanLanes';
+import { boardHintText, offBoardCards, removeCardFromBoard } from './kanbanOffBoard';
 import { laneOf, placeCardInLane, resolveLaneCards } from './kanbanPlacement';
 import * as api from '../../api';
 import type { BoardCard, KanbanColumn } from '../../api';
@@ -29,10 +34,39 @@ import { useCards } from '../../state/CardsProvider';
 // `activeView === 'board' | 'pipeline'`, and `/<prefix>/issues` maps back to
 // the `board` view id.
 //
+// The same two resources also give the board its OFF-board set for free —
+// every card in the repo that no lane holds — which is what the lane
+// header's "+" picker offers. See kanbanOffBoard: no third endpoint, no
+// second fetch, just the difference between the two lists we already have.
+//
 // The drag-and-drop is the pre-pivot board's hand-rolled HTML5 implementation
 // (dragstart on the card, dragover/drop on the lane) — deliberately no DnD
 // library. The drop writes through `useOptimisticMutation` so the card lands
-// under the cursor immediately and reverts if the server refuses.
+// under the cursor immediately and reverts if the server refuses; so does
+// every one of the Phase 7B mutations below.
+//
+// Phase 7B closed the two holes 6A left: there was no in-app way to put a
+// card ON the board (drag only moved cards BETWEEN existing lanes, which is
+// a no-op on a git repo whose board starts empty), and no lane CRUD at all.
+// Both used to be CLI-only, and the hint text used to say so.
+
+// What the lane dialog is currently doing. Rename and delete carry the
+// lane's name captured at open time, so the dialog keeps reading right
+// even if a poll lands mid-edit.
+type LaneDialog =
+  | { kind: 'create' }
+  | { kind: 'rename'; uuid: string; name: string }
+  | { kind: 'delete'; uuid: string; name: string };
+
+// A store refusal ("a lane called Doing already exists") belongs next to
+// the input that caused it, so the dialogs render it inline instead of
+// letting it through to the global error modal — which would close the
+// dialog and lose what was typed.
+function messageOf(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  const s = String(err ?? '');
+  return s || 'Something went wrong';
+}
 
 export default function KanbanBoard() {
   const { activeBoard, openCard, openIssue } = useActiveRepo();
@@ -57,16 +91,25 @@ export default function KanbanBoard() {
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [overLane, setOverLane] = useState<string | null>(null);
 
+  // Lane CRUD dialog state. `busy` gates the in-flight submit and `error`
+  // is the inline store refusal; both reset on every open.
+  const [dialog, setDialog] = useState<LaneDialog | null>(null);
+  const [dialogBusy, setDialogBusy] = useState(false);
+  const [dialogError, setDialogError] = useState('');
+
   // Per-lane UI preferences, persisted per repo and keyed on lane uuid.
   const collapsed = useCollapsedColumns(activeBoard);
   const compact = useCompactColumns(activeBoard);
 
-  // Latest-value ref so the drop handler can read the current lanes without
-  // listing `columns` as a dependency — the handler is threaded down to the
-  // memo'd cards, so a fresh identity every poll would defeat the memo.
+  // Latest-value refs so the mutation handlers can read the current lanes /
+  // pending dialog without listing them as dependencies — the handlers are
+  // threaded down to the memo'd cards, so a fresh identity every poll would
+  // defeat the memo.
   const columnsRef = useRef(columns);
+  const dialogRef = useRef(dialog);
   useEffect(() => {
     columnsRef.current = columns;
+    dialogRef.current = dialog;
   });
 
   const cardsByKey = useMemo(
@@ -77,7 +120,10 @@ export default function KanbanBoard() {
     () => columns.map(column => ({ column, cards: resolveLaneCards(column, cardsByKey) })),
     [columns, cardsByKey],
   );
-  const boardIsEmpty = lanes.every(lane => lane.cards.length === 0);
+  // The "+" picker's candidates: every card no lane holds. One pass over
+  // the board, shared by reference across every lane.
+  const offBoard = useMemo(() => offBoardCards(columns, cards), [columns, cards]);
+  const onBoardCount = cards.length - offBoard.length;
 
   // ─── Drag & drop ───────────────────────────────────────────────────
 
@@ -89,19 +135,15 @@ export default function KanbanBoard() {
   const onDragOverLane = useCallback((uuid: string) => setOverLane(uuid), []);
   const onDragLeaveLane = useCallback(() => setOverLane(null), []);
 
-  // The drop: move the dragged card into this lane, appending at the bottom.
-  // The no-op guard reads the live lanes off the ref BEFORE the optimistic
-  // update so it can abort synchronously (a drop back onto the source lane
-  // costs no round trip), and the pre-drop snapshot doubles as the rollback.
-  const onDropOnLane = useCallback((uuid: string) => {
-    const key = dragKey;
-    setDragKey(null);
-    setOverLane(null);
-    if (!key) return;
+  // placeCard is the shared body of "put this card in this lane" — the
+  // drop handler and the "+" picker differ only in how they choose the
+  // card, so they write through one path. The pre-write snapshot doubles
+  // as the rollback.
+  const placeCard = useCallback((key: string, uuid: string) => {
     const before = columnsRef.current;
     if (laneOf(before, key)?.uuid === uuid) return;
-    // A drop onto a collapsed lane expands it, so the user sees the card
-    // land instead of it vanishing behind the rotated title.
+    // Landing a card in a collapsed lane expands it, so the user sees the
+    // card arrive instead of it vanishing behind the rotated title.
     collapsed.remove(uuid);
     mutate({
       optimisticUpdate: () => {
@@ -112,7 +154,128 @@ export default function KanbanBoard() {
       rollback: () => setColumns(before),
       errorHeadline: "Couldn't move card",
     });
-  }, [activeBoard, dragKey, collapsed, mutate, setColumns]);
+  }, [activeBoard, collapsed, mutate, setColumns]);
+
+  // The drop: move the dragged card into this lane, appending at the bottom.
+  // The no-op guard inside placeCard reads the live lanes off the ref BEFORE
+  // the optimistic update so a drop back onto the source lane costs no round
+  // trip.
+  const onDropOnLane = useCallback((uuid: string) => {
+    const key = dragKey;
+    setDragKey(null);
+    setOverLane(null);
+    if (key) placeCard(key, uuid);
+  }, [dragKey, placeCard]);
+
+  // ─── Card membership ───────────────────────────────────────────────
+
+  const onAddCard = useCallback((uuid: string, key: string) => {
+    placeCard(key, uuid);
+  }, [placeCard]);
+
+  // The inverse of "+": an empty column uuid is how the seam un-opts a
+  // card, putting `kanban_column_id` back to NULL. The issue is untouched
+  // — it stays in the repo and on the Agentic Pipeline.
+  const onTakeCardOffBoard = useCallback((key: string) => {
+    const before = columnsRef.current;
+    if (!laneOf(before, key)) return;
+    mutate({
+      optimisticUpdate: () => {
+        setColumns(removeCardFromBoard(before, key));
+      },
+      persist: () => api.moveIssueToKanbanColumn(activeBoard, key, '', null),
+      onSuccess: (board) => setColumns(board),
+      rollback: () => setColumns(before),
+      errorHeadline: "Couldn't take the card off the board",
+    });
+  }, [activeBoard, mutate, setColumns]);
+
+  // ─── Lane CRUD ─────────────────────────────────────────────────────
+
+  const closeDialog = useCallback(() => {
+    setDialog(null);
+    setDialogBusy(false);
+    setDialogError('');
+  }, []);
+
+  const openDialog = useCallback((next: LaneDialog) => {
+    setDialogError('');
+    setDialogBusy(false);
+    setDialog(next);
+  }, []);
+
+  const onCreateLane = useCallback(() => openDialog({ kind: 'create' }), [openDialog]);
+  const onRenameLane = useCallback((uuid: string) => {
+    const column = columnsRef.current.find(c => c.uuid === uuid);
+    if (!column) return;
+    openDialog({ kind: 'rename', uuid, name: column.name });
+  }, [openDialog]);
+  const onDeleteLane = useCallback((uuid: string) => {
+    const column = columnsRef.current.find(c => c.uuid === uuid);
+    if (!column) return;
+    openDialog({ kind: 'delete', uuid, name: column.name });
+  }, [openDialog]);
+
+  // Create and rename both answer with the single lane they wrote (not the
+  // whole board — only reorder / delete / issue-move re-densify siblings),
+  // so each splices its answer into place rather than re-listing.
+  const submitLaneName = useCallback((value: string) => {
+    const pending = dialogRef.current;
+    if (!pending || pending.kind === 'delete') return;
+    setDialogBusy(true);
+    setDialogError('');
+    mutate({
+      persist: () => (pending.kind === 'create'
+        ? api.createKanbanColumn(activeBoard, value)
+        : api.renameKanbanColumn(activeBoard, pending.uuid, value)),
+      onSuccess: (column) => {
+        setColumns(prev => (pending.kind === 'create'
+          ? [...prev, column]
+          : prev.map(c => (c.uuid === column.uuid ? column : c))));
+        closeDialog();
+      },
+      onError: (err) => {
+        setDialogBusy(false);
+        setDialogError(messageOf(err));
+      },
+    });
+  }, [activeBoard, closeDialog, mutate, setColumns]);
+
+  const confirmDeleteLane = useCallback(() => {
+    const pending = dialogRef.current;
+    if (!pending || pending.kind !== 'delete') return;
+    setDialogBusy(true);
+    setDialogError('');
+    mutate({
+      persist: () => api.deleteKanbanColumn(activeBoard, pending.uuid),
+      onSuccess: (board) => {
+        setColumns(board);
+        closeDialog();
+      },
+      onError: (err) => {
+        setDialogBusy(false);
+        setDialogError(messageOf(err));
+      },
+    });
+  }, [activeBoard, closeDialog, mutate, setColumns]);
+
+  // Reorder is a left / right nudge: the lane's array index IS the 0-based
+  // position the store wants, and the answer is the whole re-densified
+  // board.
+  const onMoveLane = useCallback((uuid: string, delta: number) => {
+    const before = columnsRef.current;
+    const to = laneShiftTarget(before, uuid, delta);
+    if (to === null) return;
+    mutate({
+      optimisticUpdate: () => {
+        setColumns(moveLaneTo(before, uuid, to));
+      },
+      persist: () => api.reorderKanbanColumn(activeBoard, uuid, to),
+      onSuccess: (board) => setColumns(board),
+      rollback: () => setColumns(before),
+      errorHeadline: "Couldn't reorder the lane",
+    });
+  }, [activeBoard, mutate, setColumns]);
 
   // ─── Horizontal scroll persistence ─────────────────────────────────
 
@@ -153,25 +316,26 @@ export default function KanbanBoard() {
   if (loading && columns.length === 0) {
     return <div className="mk-app-state">Loading…</div>;
   }
-  if (columns.length === 0) {
-    return (
-      <div className="mk-app-state">
-        No lanes on this Kanban yet — add one with <code>bacio kanban column add &lt;NAME&gt;</code>.
-      </div>
-    );
-  }
+
+  // No early return for a lane-less board any more: the trailing "Add lane"
+  // slot IS the empty state, so a repo with no lanes renders the grid with
+  // just that slot in it and there is never a dead end.
+  const hint = boardHintText(columns.length, onBoardCount, offBoard.length);
 
   return (
     <div className="mk-kanban">
       <div className="mk-board" ref={boardRef} onScroll={onBoardScroll}>
-        {lanes.map(({ column, cards: laneCards }) => (
+        {lanes.map(({ column, cards: laneCards }, index) => (
           <KanbanLane
             key={column.uuid}
             column={column}
             cards={laneCards}
+            offBoardCards={offBoard}
             isOver={overLane === column.uuid}
             isCollapsed={collapsed.set.has(column.uuid)}
             isCompact={compact.set.has(column.uuid)}
+            canMoveLeft={index > 0}
+            canMoveRight={index < lanes.length - 1}
             draggingKey={dragKey}
             onDragOverLane={onDragOverLane}
             onDragLeaveLane={onDragLeaveLane}
@@ -184,14 +348,54 @@ export default function KanbanBoard() {
             onOpenIssue={openIssue}
             onCardDragStart={onCardDragStart}
             onCardDragEnd={onCardDragEnd}
+            onAddCard={onAddCard}
+            onTakeCardOffBoard={onTakeCardOffBoard}
+            onRenameLane={onRenameLane}
+            onMoveLane={onMoveLane}
+            onDeleteLane={onDeleteLane}
           />
         ))}
+        <button type="button" className="mk-col-add-lane" onClick={onCreateLane}>
+          <Plus size={16} strokeWidth={2} aria-hidden="true" />
+          <span>Add lane</span>
+        </button>
       </div>
-      {boardIsEmpty && (
-        <div className="mk-kanban-hint">
-          Nothing on this Kanban yet. Put a card on a lane with{' '}
-          <code>bacio kanban move &lt;KEY&gt; --column &lt;LANE&gt;</code>.
-        </div>
+      {hint && <div className="mk-kanban-hint">{hint}</div>}
+
+      {dialog?.kind === 'create' && (
+        <LaneNameDialog
+          title="Add a lane"
+          initialValue=""
+          submitLabel="Add lane"
+          busyLabel="Adding…"
+          busy={dialogBusy}
+          error={dialogError}
+          onSubmit={submitLaneName}
+          onClose={closeDialog}
+        />
+      )}
+      {dialog?.kind === 'rename' && (
+        <LaneNameDialog
+          title="Rename lane"
+          initialValue={dialog.name}
+          submitLabel="Rename"
+          busyLabel="Renaming…"
+          busy={dialogBusy}
+          error={dialogError}
+          onSubmit={submitLaneName}
+          onClose={closeDialog}
+        />
+      )}
+      {dialog?.kind === 'delete' && (
+        <LaneDeleteDialog
+          repoPrefix={activeBoard}
+          uuid={dialog.uuid}
+          name={dialog.name}
+          busy={dialogBusy}
+          error={dialogError}
+          onConfirm={confirmDeleteLane}
+          onClose={closeDialog}
+        />
       )}
     </div>
   );

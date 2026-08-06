@@ -1,4 +1,6 @@
 import { memo } from 'react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { MoreHorizontal } from 'lucide-react';
 import BlockedByBadge from '../pipeline/BlockedByBadge';
 import { cardPropsEqual } from '../pipeline/memoCard';
 import type { BoardCard } from '../../api';
@@ -34,6 +36,11 @@ type KanbanCardProps = {
   onOpenIssue?: (key: string) => void;
   onDragStart?: (key: string) => void;
   onDragEnd?: () => void;
+  // Take the card off the Kanban entirely (the seam's
+  // `moveIssueToKanbanColumn(prefix, key, '', null)`). The inverse of the
+  // lane header's "+", and the only way back off a git repo's board —
+  // dragging can move a card between lanes but never out of all of them.
+  onTakeOffBoard?: (key: string) => void;
 };
 
 function KanbanCard({
@@ -44,6 +51,7 @@ function KanbanCard({
   onOpenIssue,
   onDragStart,
   onDragEnd,
+  onTakeOffBoard,
 }: KanbanCardProps) {
   // A card an agent currently holds, or one with a dispatch queued against
   // it, is not the user's to shuffle — the Pipeline owns that lifecycle. It
@@ -83,6 +91,45 @@ function KanbanCard({
           onOpenIssue={onOpenIssue}
         />
         <span className="mk-card-id">{card.key}</span>
+        {/* The card-level menu, in the slot the pre-pivot dispatch button
+            used (and wearing its orphaned .mk-card-action-* CSS, which
+            already carries the margin-left: auto that pins it right).
+            draggable={false} so grabbing the button doesn't start the
+            card's own move-drag, and stopPropagation so opening the menu
+            doesn't trip the card's onClick → open-issue. */}
+        {onTakeOffBoard && (
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button
+                type="button"
+                className="mk-card-action-btn"
+                draggable={false}
+                aria-label={`Actions for ${card.key}`}
+                title={`Actions for ${card.key}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal size={13} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                className="mk-card-action-menu"
+                align="end"
+                side="bottom"
+                sideOffset={4}
+                collisionPadding={8}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <DropdownMenu.Item
+                  className="mk-card-action-item"
+                  onSelect={() => onTakeOffBoard(card.key)}
+                >
+                  Take off board
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        )}
       </div>
 
       <h4 className="mk-card-title">{card.title}</h4>

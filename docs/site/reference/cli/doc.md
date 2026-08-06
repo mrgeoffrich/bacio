@@ -22,6 +22,8 @@ Documents are markdown notes (or any text body) that live inside the bacio DB an
 | `bacio doc rm <filename>` | Delete a document and its links. Use `--dry-run`. |
 | `bacio doc link <filename> <ISSUE-KEY\|feature-slug>` | Upsert a link with optional `--why <text>`. |
 | `bacio doc unlink <filename> <ISSUE-KEY\|feature-slug>` | Remove a link. |
+| `bacio doc mv <filename>` | File a page into a folder (`--folder <PATH>`) or back to the tree root (`--to-root`). |
+| `bacio doc folder …` | Manage the folder tree — see [below](#the-folder-tree). |
 
 `<ISSUE-KEY|feature-slug>` auto-detects: anything matching `PREFIX-N` is an issue key, otherwise it's a feature slug in the current repo.
 
@@ -30,10 +32,40 @@ Documents are markdown notes (or any text body) that live inside the bacio DB an
 | Flag | What it does |
 |---|---|
 | `--type <type>` | Filter by document type. |
-| `--repo <PREFIX>` | Limit to one repo prefix. Required when run inside a [sync repo](/guides/sync-across-machines) (or pass `--all-repos`); ignored otherwise. |
+| `--repo <PREFIX>` | The global project selector — operate on this prefix instead of resolving from the current working tree. **Required for a [workspace](/concepts/workspaces)** (it has no working tree) and inside a [sync repo](/guides/sync-across-machines), where `--all-repos` is the alternative. Falls back to `$BACIO_REPO`. |
 | `--all-repos` | List across every tracked repo. Inside a sync repo, walks every prefix recorded in `index.yaml`. |
 
 Inside a sync repo the command reads `repos/<PREFIX>/docs/*/doc.yaml` off disk; `--type` filters as in project-repo mode. Metadata only — `content` is never inlined.
+
+## The folder tree
+
+Documents can be organised into a tree of folders. Folders are **purely organisational**: a filename stays flat and unique across the whole project, so filing a page never changes its identity, its links, its URL, or where it lands in a sync repo. See [Document folders](/concepts/document-folders) for the model.
+
+| Subcommand | What it does |
+|---|---|
+| `bacio doc folder list` | The whole tree, in tree order, one slash path per line. |
+| `bacio doc folder add <NAME>` | Create a folder. `--parent <PATH>` to nest it; omit for the tree root. |
+| `bacio doc folder rename <PATH> <NEW-NAME>` | Rename in place. The parent is untouched. `<NEW-NAME>` is a single segment. |
+| `bacio doc folder mv <PATH>` | Re-parent a folder and its whole subtree. `--to <PARENT-PATH>` or `--to-root`. |
+| `bacio doc folder rm <PATH>` | Delete a folder. Subfolders go with it; **every page inside is re-rooted, never deleted.** |
+| `bacio doc mv <filename>` | File a page. `--folder <PATH>` or `--to-root`, plus optional `--position N`. |
+
+Folders are addressed by their **slash display path** — exactly the string `bacio doc folder list` prints. Segments are matched exactly and are **case-sensitive**. Nesting is capped at 16 levels, and moving a folder inside its own subtree is refused.
+
+```bash
+bacio doc folder add Design                      # a root-level folder
+bacio doc folder add API --parent Design         # → Design/API
+bacio doc mv auth-spec.md --folder Design/API    # file a page
+bacio doc mv auth-spec.md --to-root              # un-file it
+bacio doc folder mv Design/API --to-root         # promote a folder + subtree
+bacio doc folder rm Design --dry-run             # counts before you commit
+```
+
+::: tip `""` is a destination, not a blank
+The empty path means **the tree root**. Because that's a real value, the destination is required: pass `--to-root` (or `--to ""` / `--folder ""`) explicitly. On the `--json` path the `to` / `folder` key must be *present* — omitting it is an error, never an implicit re-root.
+:::
+
+`--position` on `bacio doc mv` is a loose sort key within the folder; siblings may share one and listings tie-break on filename. Omit it to append.
 
 ## Document types
 
@@ -91,5 +123,6 @@ bacio doc show auth-spec.md --raw > /tmp/auth.md
 
 ## See also
 
+- **[Document folders](/concepts/document-folders)** — the tree, and why filenames stay flat.
 - **[`bacio issue brief`](/reference/cli/issue)** — the bulk-context call that inlines linked-doc content.
 - **[TUI Docs tab](/reference/tui/docs)** — read documents in the terminal.

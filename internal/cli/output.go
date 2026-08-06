@@ -72,6 +72,22 @@ func renderText(w io.Writer, v any) error {
 	case *client.KanbanColumnDeletePreview:
 		fmt.Fprintf(w, "Lane:              %s (position %d)\n", x.Column.Name, x.Column.Position)
 		fmt.Fprintf(w, "Cards off-boarded: %d (the issues themselves are kept)\n", x.Cascade.IssuesRemovedFromBoard)
+	case *repoDeletePreview:
+		// Without this case the struct fell through to `%v` and a
+		// `bacio repo rm --dry-run` printed a raw Go value complete with
+		// a pointer address — on the one command whose entire purpose is
+		// telling a human what is about to be destroyed.
+		if r, ok := x.Repo.(*model.Repo); ok && r != nil {
+			fmt.Fprintf(w, "%s\t%s\n", r.Prefix, r.Name)
+			fmt.Fprintf(w, "Kind:     %s\n", r.Kind)
+			fmt.Fprintf(w, "Path:     %s\n", repoPathLabel(r))
+		}
+		if c, ok := x.Cascade.(store.RepoCascadeCounts); ok {
+			fmt.Fprintln(w, "Would delete:")
+			for _, b := range repoCascadeBullets(c) {
+				fmt.Fprintf(w, "  - %s\n", b)
+			}
+		}
 	case *model.Feature:
 		fmt.Fprintf(w, "%s\t%s\n", x.Slug, x.Title)
 		fmt.Fprintf(w, "Created:  %s\n", localTime(x.CreatedAt))

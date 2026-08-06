@@ -32,6 +32,7 @@ Schema names mirror command paths: `bacio issue add` → `issue.add`, `bacio fea
 - **Strict decode.** Unknown fields are rejected, not silently dropped — typos are errors, not lossy.
 - **Canonical issue keys.** JSON payloads must use `MINI-42`, not the bare number. The bare-number shortcut is for humans on the flag path only.
 - **No silent normalisation.** Whitespace in filenames or slugs is a hard error, not a `TrimSpace` away. What you send is what gets validated.
+- **`""` can be a value, not a blank.** On the move verbs — `doc.folder.mv` (`to`), `doc.mv` (`folder`), `kanban.move` (`column`) — the empty string names a real destination: the [document tree root](/concepts/document-folders), or [off the Kanban board](/concepts/kanban-and-pipeline). Those decoders therefore check the key's **presence**, so omitting it is an error rather than an implicit re-root or an accidental sweep off the board. On the flag path, `--to-root` / `--off-board` are the explicit spellings.
 - **`--dry-run` everywhere.** Every mutation supports `--dry-run`. Stdout has the same shape as a real call (so the same parser works); stderr writes `[dry-run] no changes were written`. No audit log entry.
 
 ## See also

@@ -10,6 +10,7 @@ Every command that writes to the database accepts a JSON payload via `--json` (a
 - New mutations define an `Input` struct in `internal/cli/inputs/<group>.go` and add a `--json` branch in the runner that funnels through the same store call as the flag path.
 - Required fields fail with a specific message; pointer fields combined with the presence map distinguish "absent" (no change) from "explicit clear".
 - Issue keys in JSON must be canonical (`MINI-42`). The bare-number shortcut is for humans on the flag path.
+- **Selectors are not payload.** The global `--repo <PREFIX>` (falling back to `$BACIO_REPO`) picks *which* repo or workspace a command acts on, the same way `--db` / `--remote` / `--dry-run` pick where and whether. It is not a field on any `Input` struct and takes no `--json` key: a JSON payload describes the mutation, not the connection. It matters most for a **workspace**, which has no working tree for `git.Detect` to find — without the selector there is no way to address one at all.
 
 ### 2. Schemas are published at runtime
 Every `--json` payload has a JSON Schema (draft 2020-12) reflected from the same `inputs.*Input` struct the decoder uses, so schema and parser can't drift. Agents discover shapes via `bacio schema list / show <name> / all` rather than memorising them.

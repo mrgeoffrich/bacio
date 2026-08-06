@@ -16,7 +16,7 @@ The most-used command group. Every issue has a canonical key (e.g. `MINI-42`); h
 | `bacio issue show <KEY>` | Show one issue with comments, relations, PRs, and linked documents. |
 | `bacio issue brief <KEY>` | Bulk-context JSON: issue + parent feature + linked-doc bodies + comments + relations + PRs, in one read. Designed for agents. Always JSON. |
 | `bacio issue edit <KEY>` | Patch title, description, or feature link. |
-| `bacio issue state <KEY> <state>` | Change state. Accepts dashes/spaces (`in-progress`, `in progress`, `in_progress`). |
+| `bacio issue state <KEY> <state>` | Change state. Accepts dashes/spaces (`in-review`, `in review`, `in_review`). |
 | `bacio issue assign <KEY> <name>` | Set the assignee. Free-form name; pass an agent identity when a bot picks up the work. |
 | `bacio issue unassign <KEY>` | Clear the assignee. |
 | `bacio issue next --feature <slug>` | Atomically claim the next ready issue in a feature (see below). |
@@ -27,11 +27,13 @@ A bare number like `42` is accepted for `<KEY>` on the CLI flag path; it resolve
 
 ## States
 
-`todo` (default) · `in_progress` · `needs_action` · `in_review` · `done` · `cancelled`
+`todo` (default) · `in_review` · `done` · `cancelled`, plus the two Agentic Pipeline columns `in_pipeline` · `to_be_shipped`.
 
-`needs_action` is the LLM-flow column: an agent in the middle of a `--feature` loop flips an issue from `in_progress` to `needs_action` when it's blocked on user input. The assignee stays put; the column signals that the next move is the human's, not the agent's. Move it back to `in_progress` (or onward to `in_review`) once you've answered.
+The state parser tolerates dashes or spaces, so `in-review`, `in review`, and `in_review` all work. The lowercase form is required.
 
-The state parser tolerates dashes or spaces, so `in-progress`, `in progress`, and `in_progress` all work. The lowercase form is required.
+::: tip State is not the Kanban lane
+An issue's **state** is the Agentic Pipeline axis. Its **lane** is your own board, set with [`bacio kanban`](/reference/cli/kanban), and the two never move each other. See [Kanban and the Agentic Pipeline](/concepts/kanban-and-pipeline).
+:::
 
 ## Filter `bacio issue list`
 
@@ -40,7 +42,7 @@ The state parser tolerates dashes or spaces, so `in-progress`, `in progress`, an
 | `--state s1,s2` | Comma-separated states. |
 | `--feature <slug>` (`-f`) | Limit to one feature. |
 | `--tag <name>` | Repeatable. Multiple tags AND-combine. |
-| `--repo <PREFIX>` | Limit to one repo prefix. Required when run inside a sync repo (or pass `--all-repos`); ignored otherwise — `cwd` resolves the repo in a normal project working tree. |
+| `--repo <PREFIX>` | The global project selector — operate on this prefix instead of resolving from the current working tree. **Required for a [workspace](/concepts/workspaces)** and inside a sync repo, where `--all-repos` is the alternative. Falls back to `$BACIO_REPO`. |
 | `--all-repos` | Search every tracked repo. Inside a sync repo, walks every prefix recorded in `index.yaml`. |
 | `--with-description` | Inflate the `description` field (lean by default). |
 
@@ -56,11 +58,11 @@ bacio issue add "Login broken on Safari" \
   --tag bug --tag P0
 
 # List
-bacio issue list --state todo,in_progress -o json
+bacio issue list --state todo,in_review -o json
 bacio issue list --tag bug --tag P0           # AND: bugs that are also P0
 
 # Move state
-bacio issue state MINI-42 in-progress
+bacio issue state MINI-42 in-review
 
 # Detail
 bacio issue show MINI-42
@@ -83,7 +85,7 @@ Projection flags trim the brief when the full payload is too much:
 
 ## `next` / `peek` — the atomic claim pattern
 
-`bacio issue next --feature <slug>` claims the next ready issue: the lowest-numbered `todo` issue with **all blockers in a terminal state** (`done`, `cancelled`) and **no existing assignee**. It flips the issue to `in_progress` and stamps the assignee with the calling agent's identity (resolved via `.bacio/agents.json`).
+`bacio issue next --feature <slug>` claims the next ready issue: the lowest-numbered `todo` issue with **all blockers in a terminal state** (`done`, `cancelled`) and **no existing assignee**. It stamps the assignee with the calling agent's identity (resolved via `.bacio/agents.json`). The claim is a focus marker — since BACI-300 it no longer changes the issue's state.
 
 ```bash
 bacio issue next --feature auth-rewrite -o json
@@ -91,10 +93,9 @@ bacio issue next --feature auth-rewrite -o json
 
 When nothing is currently claimable it emits `{"issue": null}` and **exits 0** — callers poll / retry rather than treating that as an error.
 
-Multiple agents calling `next` in parallel is safe: SQLite serialises the claim. Crashed agents leave a stale `in_progress` / assigned issue; clear with:
+Multiple agents calling `next` in parallel is safe: SQLite serialises the claim. A crashed agent leaves a stale assignee; clear it with:
 
 ```bash
-bacio issue state MINI-3 todo
 bacio issue unassign MINI-3
 ```
 
@@ -102,6 +103,7 @@ bacio issue unassign MINI-3
 
 ## See also
 
+- **[`bacio kanban`](/reference/cli/kanban)** — put an issue on your own board, orthogonal to its state.
 - **[`bacio feature plan`](/reference/cli/feature)** — print open issues in execution order, respecting `blocks`.
 - **[`bacio link`](/reference/cli/link)** — wire up `blocks` / `relates-to` / `duplicate-of`.
 - **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — the JSON + `--dry-run` flow and how agent identity is resolved.

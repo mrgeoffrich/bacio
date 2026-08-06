@@ -15,7 +15,7 @@ You sit down with coffee and Claude Code:
 
 > What changed yesterday, and what's in flight?
 
-Claude runs `bacio issue list -o json --state in_progress`, `bacio issue list -o json --state in_review`, and `bacio history --since 1d -o json`, then summarises what's in flight, what's blocked, and what changed yesterday. Read-only — no writes.
+Claude runs `bacio issue list -o json --state in_pipeline`, `bacio issue list -o json --state in_review`, and `bacio history --since 1d -o json`, then summarises what's in flight, what's blocked, and what changed yesterday. Read-only — no writes.
 
 Or:
 

@@ -1,6 +1,8 @@
 import { AnimatePresence, m } from 'motion/react';
 import Icon from '../Icon';
+import AddCardsMenu from './AddCardsMenu';
 import KanbanCard from './KanbanCard';
+import LaneMenu from './LaneMenu';
 import type { BoardCard, KanbanColumn } from '../../api';
 
 // KanbanLane — one lane of the Kanban board: its header (name pill, count,
@@ -23,9 +25,17 @@ type KanbanLaneProps = {
   // list, in lane order. Refs whose issue isn't in the card list (archived and
   // hidden, filtered) are dropped by the board before they get here.
   cards: BoardCard[];
+  // Every card in the repo that no lane holds — the "+" picker's
+  // candidates. Derived once by the board and shared by reference across
+  // every lane, so it costs one pass over the board, not one per lane.
+  offBoardCards: BoardCard[];
   isOver: boolean;
   isCollapsed: boolean;
   isCompact: boolean;
+  // Whether a left / right nudge would land anywhere. False at the ends
+  // of the board, where LaneMenu omits the item rather than greying it.
+  canMoveLeft: boolean;
+  canMoveRight: boolean;
   draggingKey: string | null;
   onDragOverLane: (uuid: string) => void;
   onDragLeaveLane: () => void;
@@ -38,14 +48,25 @@ type KanbanLaneProps = {
   onOpenIssue: (key: string) => void;
   onCardDragStart: (key: string) => void;
   onCardDragEnd: () => void;
+  // Lane-level CRUD. Same shape as the drag callbacks — they take the
+  // lane uuid rather than being pre-bound per lane, so the board hands
+  // every lane ONE stable identity each.
+  onAddCard: (uuid: string, key: string) => void;
+  onTakeCardOffBoard: (key: string) => void;
+  onRenameLane: (uuid: string) => void;
+  onMoveLane: (uuid: string, delta: number) => void;
+  onDeleteLane: (uuid: string) => void;
 };
 
 export default function KanbanLane({
   column,
   cards,
+  offBoardCards,
   isOver,
   isCollapsed,
   isCompact,
+  canMoveLeft,
+  canMoveRight,
   draggingKey,
   onDragOverLane,
   onDragLeaveLane,
@@ -58,6 +79,11 @@ export default function KanbanLane({
   onOpenIssue,
   onCardDragStart,
   onCardDragEnd,
+  onAddCard,
+  onTakeCardOffBoard,
+  onRenameLane,
+  onMoveLane,
+  onDeleteLane,
 }: KanbanLaneProps) {
   return (
     <div
@@ -85,6 +111,25 @@ export default function KanbanLane({
           <header className="mk-col-head">
             <span className="mk-col-pill is-lane">{column.name}</span>
             <span className="mk-col-count">{cards.length}</span>
+            {/* The two Phase 7B CRUD affordances, deliberately always
+                visible rather than hover-revealed: the gap this closes is
+                "there is no in-app way to do this", so hiding the way
+                until the pointer happens to be over the header would
+                leave most of it unclosed. */}
+            <AddCardsMenu
+              laneName={column.name}
+              candidates={offBoardCards}
+              onAdd={(key) => onAddCard(column.uuid, key)}
+            />
+            <LaneMenu
+              laneName={column.name}
+              canMoveLeft={canMoveLeft}
+              canMoveRight={canMoveRight}
+              onRename={() => onRenameLane(column.uuid)}
+              onMoveLeft={() => onMoveLane(column.uuid, -1)}
+              onMoveRight={() => onMoveLane(column.uuid, 1)}
+              onDelete={() => onDeleteLane(column.uuid)}
+            />
             {/* Compact-cards toggle, between the count and the collapse
                 chevron. The glyph swaps with state: converging chevrons
                 when expanded read as "squeeze together", diverging ones
@@ -109,7 +154,7 @@ export default function KanbanLane({
           </header>
           <div className="mk-col-body">
             {cards.length === 0 && (
-              <div className="mk-col-empty">Drag a card here</div>
+              <div className="mk-col-empty">Drag a card here, or add one with +</div>
             )}
             {/* AnimatePresence so a card leaving the lane (dragged away, or
                 taken off the board by another window's poll) plays its exit
@@ -136,6 +181,7 @@ export default function KanbanLane({
                     onOpenIssue={onOpenIssue}
                     onDragStart={onCardDragStart}
                     onDragEnd={onCardDragEnd}
+                    onTakeOffBoard={onTakeCardOffBoard}
                   />
                 </m.div>
               ))}
