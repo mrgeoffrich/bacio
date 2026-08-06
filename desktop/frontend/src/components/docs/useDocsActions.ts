@@ -60,6 +60,15 @@ export type DeleteDialogState = {
   lines: string[];
   busy: boolean;
   error: string;
+  // confirmDisabled holds the destructive button back while `lines` is
+  // still a placeholder. A folder delete opens on a dry run, so for one
+  // round trip the dialog can only say "Checking what this would
+  // remove…" — and a confirmation whose stated consequence is still
+  // loading is a confirmation of nothing. Same gate the Kanban lane
+  // delete applies (LaneDeleteDialog), and it matters more here: the
+  // folder's subtree really is deleted, where a lane only unsets
+  // membership.
+  confirmDisabled: boolean;
   onConfirm: () => void;
   onClose: () => void;
 };
@@ -387,6 +396,8 @@ export function useDocsActions({
         ...base,
         title: 'Delete folder',
         subject: p?.path || pendingDelete.name,
+        // Nothing to confirm until the dry run lands.
+        confirmDisabled: p === null,
         lines: p
           ? [
               p.subfolders === 1
@@ -403,6 +414,9 @@ export function useDocsActions({
       ...base,
       title: 'Delete page',
       subject: pendingDelete?.kind === 'page' ? pendingDelete.filename : '',
+      // A page delete has no preview to wait on — its consequences are
+      // fixed and stated below.
+      confirmDisabled: false,
       lines: [
         'The body and every link pointing at it are removed permanently.',
         'Archive instead if you only want it out of the way.',

@@ -140,11 +140,26 @@ func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
 		q += frag
 		args = append(args, fargs...)
 	}
-	// folder_position first, filename as the tie-break: inside one
-	// folder the manual drag order wins, and an untouched folder (every
-	// position still 0, which is every pre-pivot document) falls back to
-	// exactly the alphabetical order this list has always had.
-	q += ` ORDER BY folder_position, filename`
+	// folder_position leads ONLY when the query is scoped to one folder.
+	// Inside a folder it is the manual drag order, and an untouched
+	// folder (every position still 0, which is every pre-pivot document)
+	// falls back to exactly the alphabetical order this list has always
+	// had.
+	//
+	// Unscoped, it is meaningless as a primary key: it indexes WITHIN a
+	// folder, so ordering a whole repo by it interleaves folders by their
+	// internal slot — a page at index 3 of "Design" would sort after a
+	// page at index 0 of "Meetings", and the flat list (`bacio doc list`,
+	// GET /repos/{prefix}/documents) would be neither alphabetical nor
+	// grouped. The tree surfaces don't need it here either: the rail
+	// re-sorts each folder's pages client-side (lib/docsFilter's
+	// cmpDocsInFolder) and the sync exporter groups and sorts its own
+	// membership sequence, both from folder_position on the row.
+	if f.Folder.Constrained() {
+		q += ` ORDER BY folder_position, filename`
+	} else {
+		q += ` ORDER BY filename`
+	}
 	rows, err := s.DB.Query(q, args...)
 	if err != nil {
 		return nil, err

@@ -198,7 +198,17 @@ func (c *localClient) MoveIssueToKanbanColumn(ctx context.Context, repo *model.R
 		if columnID == nil {
 			projected.KanbanPosition = 0
 		} else {
-			projected.KanbanPosition = position
+			// Rehearse the store's clamp. `position` is the
+			// kanbanAppendPosition sentinel whenever the caller omitted
+			// one, so echoing it verbatim would report 2147483647 as the
+			// slot the card is about to land in — a projection that is
+			// never what the real call produces. Same stance as
+			// ReorderKanbanColumn's dry-run above.
+			slot, perr := c.projectedKanbanPosition(repo, iss, *columnID, position)
+			if perr != nil {
+				return nil, perr
+			}
+			projected.KanbanPosition = slot
 		}
 		return &projected, nil
 	}
@@ -237,6 +247,28 @@ func (c *localClient) kanbanColumnInRepo(repo *model.Repo, uuid string) (*model.
 		return nil, fmt.Errorf("kanban column %s is not in repo %s", uuid, repo.Prefix)
 	}
 	return col, nil
+}
+
+// projectedKanbanPosition is the slot SetIssueKanbanColumn would actually
+// give `iss` in lane `columnID` for the requested `want`.
+//
+// store.renumberKanbanLaneTx lifts the moved card out of the lane and
+// re-inserts it at an index clamped to [0, n] where n is the lane's size
+// WITHOUT that card — so a card moving within its own lane sees one fewer
+// slot than a card arriving from elsewhere. Mirroring that here is what
+// lets --dry-run report the real answer instead of the append sentinel.
+//
+// countCardsInLane counts archived rows too, matching the store's
+// renumber (which deliberately does not skip them).
+func (c *localClient) projectedKanbanPosition(repo *model.Repo, iss *model.Issue, columnID int64, want int) (int, error) {
+	n, err := c.countCardsInLane(repo, columnID)
+	if err != nil {
+		return 0, err
+	}
+	if iss.KanbanColumnID != nil && *iss.KanbanColumnID == columnID {
+		n-- // already in this lane; it doesn't occupy a slot it's moving from
+	}
+	return clampInt(want, 0, n), nil
 }
 
 // countCardsInLane counts the issues currently in one lane — the delete

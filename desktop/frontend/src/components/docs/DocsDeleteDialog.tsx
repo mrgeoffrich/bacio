@@ -12,6 +12,11 @@ import Modal from '../Modal';
 // subtree is RE-ROOTED, never destroyed. Those counts come from
 // `previewDeleteDocFolder`, the dry-run twin of the real delete, so the
 // dialog reports the actual blast radius rather than a guess.
+//
+// That preview is one round trip behind the dialog opening, so Delete
+// stays disabled until it lands (`confirmDisabled`) — a confirmation
+// whose stated consequence is still loading is a confirmation of
+// nothing. Same rule as LaneDeleteDialog on the Kanban.
 
 type DocsDeleteDialogProps = {
   open: boolean;
@@ -22,6 +27,9 @@ type DocsDeleteDialogProps = {
   lines: string[];
   busy: boolean;
   error: string;
+  // True while `lines` is a placeholder rather than the real blast
+  // radius — see the header note.
+  confirmDisabled: boolean;
   onConfirm: () => void;
   onClose: () => void;
 };
@@ -33,6 +41,7 @@ export default function DocsDeleteDialog({
   lines,
   busy,
   error,
+  confirmDisabled,
   onConfirm,
   onClose,
 }: DocsDeleteDialogProps) {
@@ -59,7 +68,7 @@ export default function DocsDeleteDialog({
             type="button"
             className="mk-segmented-btn is-danger"
             onClick={onConfirm}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
           >
             {busy ? 'Deleting…' : 'Delete'}
           </button>

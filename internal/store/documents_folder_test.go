@@ -281,3 +281,72 @@ func docNames(docs []*model.Document) []string {
 	}
 	return out
 }
+
+// TestListDocumentsUnscopedStaysAlphabetical is the guard on the flat
+// list's ordering contract.
+//
+// folder_position indexes a page WITHIN its folder, so it is only a
+// meaningful sort key when the query is scoped to one. Leading the
+// unscoped ORDER BY with it interleaves folders by their internal slot —
+// a page at index 3 of "Design" sorting after a page at index 0 of
+// "Meetings" — which is neither the alphabetical order `bacio doc list`
+// and GET /repos/{prefix}/documents have always returned nor anything a
+// reader could predict.
+//
+// TestListDocumentsFolderOrder above covers the untouched case, where
+// every position is still 0 and the filename tie-break hides the
+// problem. This one gives the positions distinct non-zero values across
+// two folders and the root, which is the only shape that catches it.
+func TestListDocumentsUnscopedStaysAlphabetical(t *testing.T) {
+	s, repo := seedFolderRepo(t)
+	design := mustFolder(t, s, repo.ID, nil, "Design")
+	meetings := mustFolder(t, s, repo.ID, nil, "Meetings")
+
+	// aardvark.md is alphabetically first but sits deepest in its folder,
+	// so a folder_position-led ORDER BY sorts it LAST.
+	aardvark := mustDoc(t, s, repo.ID, "aardvark.md")
+	beta := mustDoc(t, s, repo.ID, "beta.md")
+	zulu := mustDoc(t, s, repo.ID, "zulu.md")
+	mustDoc(t, s, repo.ID, "root-note.md") // stays at the tree root, position 0
+
+	if err := s.SetDocumentFolder(aardvark.ID, &design.ID, 3); err != nil {
+		t.Fatalf("SetDocumentFolder(aardvark): %v", err)
+	}
+	if err := s.SetDocumentFolder(beta.ID, &design.ID, 0); err != nil {
+		t.Fatalf("SetDocumentFolder(beta): %v", err)
+	}
+	if err := s.SetDocumentFolder(zulu.ID, &meetings.ID, 0); err != nil {
+		t.Fatalf("SetDocumentFolder(zulu): %v", err)
+	}
+
+	docs, err := s.ListDocuments(DocumentFilter{RepoID: repo.ID})
+	if err != nil {
+		t.Fatalf("ListDocuments: %v", err)
+	}
+	want := []string{"aardvark.md", "beta.md", "root-note.md", "zulu.md"}
+	if got := docNames(docs); !equalStrings(got, want) {
+		t.Errorf("unscoped list = %v, want alphabetical %v\n"+
+			"folder_position must not lead the ORDER BY unless the query is folder-scoped — "+
+			"it indexes within a folder, so unscoped it interleaves folders by their internal slot.",
+			got, want)
+	}
+
+	// The scoped read still honours the manual order — the two must not
+	// be traded off against each other.
+	docs, err = s.ListDocuments(DocumentFilter{RepoID: repo.ID, Folder: InFolder(design.ID)})
+	if err != nil {
+		t.Fatalf("ListDocuments(scoped): %v", err)
+	}
+	if got := docNames(docs); !equalStrings(got, []string{"beta.md", "aardvark.md"}) {
+		t.Errorf("scoped list = %v, want [beta.md aardvark.md] (manual order)", got)
+	}
+
+	// And the root scope, which is the case a bare *int64 can't express.
+	docs, err = s.ListDocuments(DocumentFilter{RepoID: repo.ID, Folder: RootFolder()})
+	if err != nil {
+		t.Fatalf("ListDocuments(root): %v", err)
+	}
+	if got := docNames(docs); !equalStrings(got, []string{"root-note.md"}) {
+		t.Errorf("root scope = %v, want [root-note.md]", got)
+	}
+}

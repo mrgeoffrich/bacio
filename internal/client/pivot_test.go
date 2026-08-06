@@ -448,3 +448,162 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// TestMoveIssueToKanbanColumnDryRunProjectsTheRealSlot pins the one thing
+// a --dry-run exists to do: report the value the real call will write.
+//
+// The append path is the trap. `position` carries the
+// kanbanAppendPosition sentinel (math.MaxInt32) whenever the caller omits
+// a slot, and echoing it into the projection reported
+// `kanban_position: 2147483647` on `bacio kanban move --column Doing
+// --dry-run` and on PUT .../kanban?dry_run=true. Every case below asserts
+// the projection against what the committed move actually produces rather
+// than against a hard-coded number, so the two can't drift apart again.
+func TestMoveIssueToKanbanColumnDryRunProjectsTheRealSlot(t *testing.T) {
+	ctx := context.Background()
+
+	// rehearseThenCommit runs the same move twice — once dry, once for
+	// real — and returns both positions.
+	rehearseThenCommit := func(t *testing.T, c *localClient, repo *model.Repo, in IssueKanbanMoveInput) (int, int) {
+		t.Helper()
+		dry, err := c.MoveIssueToKanbanColumn(ctx, repo, in, true)
+		if err != nil {
+			t.Fatalf("dry-run move: %v", err)
+		}
+		real, err := c.MoveIssueToKanbanColumn(ctx, repo, in, false)
+		if err != nil {
+			t.Fatalf("move: %v", err)
+		}
+		return dry.KanbanPosition, real.KanbanPosition
+	}
+
+	t.Run("append_onto_an_empty_lane", func(t *testing.T) {
+		c, _ := openTestLocalClient(t)
+		repo := seedBootstrappedRepo(t, c, "DRYA")
+		lanes, err := c.ListKanbanColumns(ctx, repo)
+		if err != nil {
+			t.Fatalf("ListKanbanColumns: %v", err)
+		}
+		iss, err := c.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: "first card"}, false)
+		if err != nil {
+			t.Fatalf("CreateIssue: %v", err)
+		}
+		dry, real := rehearseThenCommit(t, c, repo, IssueKanbanMoveInput{
+			IssueKey: iss.Key, ColumnUUID: lanes[0].UUID, Position: nil,
+		})
+		if dry != real {
+			t.Errorf("dry-run projected position %d, the real move produced %d", dry, real)
+		}
+		if real != 0 {
+			t.Errorf("first card in an empty lane should land at 0, got %d", real)
+		}
+	})
+
+	t.Run("append_onto_a_populated_lane", func(t *testing.T) {
+		c, _ := openTestLocalClient(t)
+		repo := seedBootstrappedRepo(t, c, "DRYB")
+		lanes, err := c.ListKanbanColumns(ctx, repo)
+		if err != nil {
+			t.Fatalf("ListKanbanColumns: %v", err)
+		}
+		for _, title := range []string{"one", "two", "three"} {
+			iss, err := c.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: title}, false)
+			if err != nil {
+				t.Fatalf("CreateIssue(%s): %v", title, err)
+			}
+			if _, err := c.MoveIssueToKanbanColumn(ctx, repo, IssueKanbanMoveInput{
+				IssueKey: iss.Key, ColumnUUID: lanes[0].UUID,
+			}, false); err != nil {
+				t.Fatalf("seed move(%s): %v", title, err)
+			}
+		}
+		// A fourth card appended to a lane of three lands at index 3.
+		iss, err := c.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: "four"}, false)
+		if err != nil {
+			t.Fatalf("CreateIssue: %v", err)
+		}
+		dry, real := rehearseThenCommit(t, c, repo, IssueKanbanMoveInput{
+			IssueKey: iss.Key, ColumnUUID: lanes[0].UUID, Position: nil,
+		})
+		if dry != real {
+			t.Errorf("dry-run projected position %d, the real move produced %d", dry, real)
+		}
+		if real != 3 {
+			t.Errorf("appended card should land at 3, got %d", real)
+		}
+	})
+
+	t.Run("append_within_the_lane_the_card_is_already_in", func(t *testing.T) {
+		// The off-by-one case: renumberKanbanLaneTx lifts the moved card
+		// OUT before clamping, so a card already in the lane sees one
+		// fewer slot than an arriving one.
+		c, _ := openTestLocalClient(t)
+		repo := seedBootstrappedRepo(t, c, "DRYC")
+		lanes, err := c.ListKanbanColumns(ctx, repo)
+		if err != nil {
+			t.Fatalf("ListKanbanColumns: %v", err)
+		}
+		var first *model.Issue
+		for _, title := range []string{"one", "two", "three"} {
+			iss, err := c.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: title}, false)
+			if err != nil {
+				t.Fatalf("CreateIssue(%s): %v", title, err)
+			}
+			if first == nil {
+				first = iss
+			}
+			if _, err := c.MoveIssueToKanbanColumn(ctx, repo, IssueKanbanMoveInput{
+				IssueKey: iss.Key, ColumnUUID: lanes[0].UUID,
+			}, false); err != nil {
+				t.Fatalf("seed move(%s): %v", title, err)
+			}
+		}
+		dry, real := rehearseThenCommit(t, c, repo, IssueKanbanMoveInput{
+			IssueKey: first.Key, ColumnUUID: lanes[0].UUID, Position: nil,
+		})
+		if dry != real {
+			t.Errorf("dry-run projected position %d, the real move produced %d", dry, real)
+		}
+		if real != 2 {
+			t.Errorf("re-appending within a 3-card lane should land at 2, got %d", real)
+		}
+	})
+
+	t.Run("explicit_position_past_the_end_is_clamped_in_both", func(t *testing.T) {
+		c, _ := openTestLocalClient(t)
+		repo := seedBootstrappedRepo(t, c, "DRYD")
+		lanes, err := c.ListKanbanColumns(ctx, repo)
+		if err != nil {
+			t.Fatalf("ListKanbanColumns: %v", err)
+		}
+		iss, err := c.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: "only card"}, false)
+		if err != nil {
+			t.Fatalf("CreateIssue: %v", err)
+		}
+		want := 99
+		dry, real := rehearseThenCommit(t, c, repo, IssueKanbanMoveInput{
+			IssueKey: iss.Key, ColumnUUID: lanes[0].UUID, Position: &want,
+		})
+		if dry != real {
+			t.Errorf("dry-run projected position %d, the real move produced %d", dry, real)
+		}
+		if real != 0 {
+			t.Errorf("clamped position should be 0, got %d", real)
+		}
+	})
+
+	t.Run("off_the_board_projects_zero", func(t *testing.T) {
+		c, _ := openTestLocalClient(t)
+		ws := seedWorkspace(t, c, "Planning")
+		iss, err := c.CreateIssue(ctx, ws, inputs.IssueAddInput{Title: "on the board"}, false)
+		if err != nil {
+			t.Fatalf("CreateIssue: %v", err)
+		}
+		dry, real := rehearseThenCommit(t, c, ws, IssueKanbanMoveInput{
+			IssueKey: iss.Key, ColumnUUID: "",
+		})
+		if dry != real || real != 0 {
+			t.Errorf("off-board: dry-run %d, real %d, want both 0", dry, real)
+		}
+	})
+}
