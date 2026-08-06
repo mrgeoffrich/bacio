@@ -63,6 +63,62 @@ type DocumentFilter struct {
 	// non-NULL archived_at. Defaults to false — archived docs are
 	// hidden from default lists.
 	IncludeArchived bool
+	// Folder constrains the doc-folder placement. The zero value means
+	// "no constraint" — see DocFolderScope for why this isn't a bare
+	// *int64.
+	Folder DocFolderScope
+}
+
+// DocFolderScope is DocumentFilter's folder constraint. It exists
+// because the constraint is THREE-WAY and a bare *int64 can only express
+// two of the three states:
+//
+//	unconstrained  — every document, in any folder or none
+//	root only      — folder_id IS NULL (the pre-pivot placement every
+//	                 existing document keeps, with no backfill)
+//	one folder     — folder_id = <id>
+//
+// The fields are unexported and the only way to build a non-zero value
+// is through AnyFolder / RootFolder / InFolder, which makes the obvious
+// bug — setting the folder id but forgetting the "is it set" flag, and
+// silently listing every document in the repo — unrepresentable. The
+// zero value is AnyFolder(), so every pre-pivot
+// `DocumentFilter{RepoID: x}` call site keeps its exact behaviour.
+type DocFolderScope struct {
+	constrained bool
+	id          *int64
+}
+
+// AnyFolder applies no folder constraint. Same as the zero value; spell
+// it out at a call site where the intent matters.
+func AnyFolder() DocFolderScope { return DocFolderScope{} }
+
+// RootFolder restricts to documents sitting at the tree root
+// (folder_id IS NULL) — the case a bare *int64 cannot express.
+func RootFolder() DocFolderScope { return DocFolderScope{constrained: true} }
+
+// InFolder restricts to the documents directly inside one folder. It is
+// NOT recursive: a document in a child folder is not "in" the parent.
+func InFolder(id int64) DocFolderScope { return DocFolderScope{constrained: true, id: &id} }
+
+// Constrained reports whether this scope narrows the query at all.
+func (f DocFolderScope) Constrained() bool { return f.constrained }
+
+// FolderID returns the folder this scope selects: nil means the tree
+// root when Constrained() is true, and is meaningless when it is false.
+func (f DocFolderScope) FolderID() *int64 { return f.id }
+
+// clause renders the scope as a SQL fragment plus its args. Empty
+// fragment when unconstrained.
+func (f DocFolderScope) clause() (string, []any) {
+	switch {
+	case !f.constrained:
+		return "", nil
+	case f.id == nil:
+		return " AND folder_id IS NULL", nil
+	default:
+		return " AND folder_id = ?", []any{*f.id}
+	}
 }
 
 func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
@@ -80,7 +136,15 @@ func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
 	if !f.IncludeArchived {
 		q += ` AND archived_at IS NULL`
 	}
-	q += ` ORDER BY filename`
+	if frag, fargs := f.Folder.clause(); frag != "" {
+		q += frag
+		args = append(args, fargs...)
+	}
+	// folder_position first, filename as the tie-break: inside one
+	// folder the manual drag order wins, and an untouched folder (every
+	// position still 0, which is every pre-pivot document) falls back to
+	// exactly the alphabetical order this list has always had.
+	q += ` ORDER BY folder_position, filename`
 	rows, err := s.DB.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -181,6 +245,82 @@ func (s *Store) SetDocumentArchived(documentID int64, archived bool) error {
 	}
 	_, err := s.DB.Exec(`UPDATE documents SET archived_at = NULL WHERE id = ?`, documentID)
 	return err
+}
+
+// SetDocumentFolder places a document in the repo's doc-folder tree.
+// folderID nil means the tree root — the placement every pre-pivot
+// document already has, and the one a folder deletion re-roots pages to.
+//
+// position is written literally: it is a sort key, not an index, and
+// need be neither dense nor unique. ListDocuments orders by
+// (folder_position, filename), so siblings sharing a position still sort
+// deterministically. A caller driving a drag-and-drop reorder writes the
+// new position for each affected sibling.
+//
+// The folder must live in the document's own repo (ErrDocFolderOtherRepo
+// otherwise) — the tree is strictly per-repo, and a cross-repo move
+// would put a page in a tree its repo never renders.
+//
+// Deliberately does NOT bump documents.updated_at. Folder membership is
+// NOT part of doc.yaml — it lives on the container side, in the folder's
+// own synced record — so a move changes no byte of the document's synced
+// form, and bumping updated_at would both rewrite doc.yaml on the next
+// export and let a pure re-filing win the sync LWW race against a real
+// remote content edit. The affected folders' updated_at IS bumped: their
+// membership list is what changed, and that timestamp is what the
+// import-side membership dedupe (last writer by folder updated_at) keys
+// on.
+func (s *Store) SetDocumentFolder(docID int64, folderID *int64, position int) error {
+	if position < 0 {
+		return fmt.Errorf("position must be >= 0, got %d", position)
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var (
+		repoID      int64
+		oldFolderID sql.NullInt64
+	)
+	if err := tx.QueryRow(`SELECT repo_id, folder_id FROM documents WHERE id = ?`, docID).Scan(&repoID, &oldFolderID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if folderID != nil {
+		folder, ferr := getDocFolder(tx, *folderID)
+		if ferr != nil {
+			if errors.Is(ferr, ErrNotFound) {
+				return fmt.Errorf("%w: folder %d", ErrNotFound, *folderID)
+			}
+			return ferr
+		}
+		if folder.RepoID != repoID {
+			return fmt.Errorf("%w: folder %d is in repo %d, document %d is in repo %d",
+				ErrDocFolderOtherRepo, folder.ID, folder.RepoID, docID, repoID)
+		}
+	}
+	if _, err := tx.Exec(
+		`UPDATE documents SET folder_id = ?, folder_position = ? WHERE id = ?`,
+		folderID, position, docID,
+	); err != nil {
+		return err
+	}
+	touch := []int64{}
+	if oldFolderID.Valid {
+		touch = append(touch, oldFolderID.Int64)
+	}
+	if folderID != nil && (!oldFolderID.Valid || oldFolderID.Int64 != *folderID) {
+		touch = append(touch, *folderID)
+	}
+	for _, fid := range touch {
+		if _, err := tx.Exec(`UPDATE doc_folders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, fid); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // UpdateDocument patches the type, content, and/or source_path. Pass nil for
@@ -402,7 +542,7 @@ func (s *Store) CreateDocumentFromSync(repoID int64, uuid, filename string, t mo
 }
 
 func docCols(withContent bool) string {
-	c := "id, uuid, repo_id, filename, type, size_bytes, source_path, archived_at, created_at, updated_at"
+	c := "id, uuid, repo_id, filename, type, size_bytes, source_path, archived_at, folder_id, folder_position, created_at, updated_at"
 	if withContent {
 		c += ", content"
 	}
@@ -418,9 +558,10 @@ func scanDocumentWithSnippet(row rowScanner) (*model.Document, string, error) {
 		d          model.Document
 		typ        string
 		archivedAt sql.NullTime
+		folderID   sql.NullInt64
 		snippet    string
 	)
-	err := row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &archivedAt, &d.CreatedAt, &d.UpdatedAt, &snippet)
+	err := row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &archivedAt, &folderID, &d.FolderPosition, &d.CreatedAt, &d.UpdatedAt, &snippet)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", ErrNotFound
 	}
@@ -432,6 +573,10 @@ func scanDocumentWithSnippet(row rowScanner) (*model.Document, string, error) {
 		t := archivedAt.Time
 		d.ArchivedAt = &t
 	}
+	if folderID.Valid {
+		f := folderID.Int64
+		d.FolderID = &f
+	}
 	return &d, snippet, nil
 }
 
@@ -440,12 +585,13 @@ func scanDocument(row rowScanner, withContent bool) (*model.Document, error) {
 		d          model.Document
 		typ        string
 		archivedAt sql.NullTime
+		folderID   sql.NullInt64
 		err        error
 	)
 	if withContent {
-		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &archivedAt, &d.CreatedAt, &d.UpdatedAt, &d.Content)
+		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &archivedAt, &folderID, &d.FolderPosition, &d.CreatedAt, &d.UpdatedAt, &d.Content)
 	} else {
-		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &archivedAt, &d.CreatedAt, &d.UpdatedAt)
+		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &archivedAt, &folderID, &d.FolderPosition, &d.CreatedAt, &d.UpdatedAt)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -457,6 +603,10 @@ func scanDocument(row rowScanner, withContent bool) (*model.Document, error) {
 	if archivedAt.Valid {
 		t := archivedAt.Time
 		d.ArchivedAt = &t
+	}
+	if folderID.Valid {
+		f := folderID.Int64
+		d.FolderID = &f
 	}
 	return &d, nil
 }

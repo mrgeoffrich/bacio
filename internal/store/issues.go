@@ -224,6 +224,23 @@ type IssueFilter struct {
 	// through regardless; the toggle is per-feature, not per-issue,
 	// so an unattached issue can't be hidden via this path.
 	HiddenFeatureSlugs []string
+	// OnKanban filters on board membership — the SECOND AXIS the
+	// workspaces/Kanban pivot added, orthogonal to States above.
+	// true  => kanban_column_id IS NOT NULL (the card is on the human
+	// Kanban); false => IS NULL (it is not); nil (the zero value, and
+	// therefore every pre-existing caller) => no constraint at all.
+	//
+	// This is the filter behind the rule that stops the Kanban and the
+	// Agentic Pipeline double-rendering the same `todo` card: a Kanban
+	// surface lists with OnKanban=true, and a git repo's issues start
+	// with a NULL column so they stay on the Pipeline Backlog only,
+	// until the user explicitly opts them onto the board.
+	//
+	// The ORDER BY is deliberately unchanged (r.prefix, i.number). A
+	// Kanban surface wanting lane order sorts the returned rows on
+	// KanbanPosition — re-keying this shared query would churn every
+	// other consumer of ListIssues.
+	OnKanban *bool
 }
 
 func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
@@ -258,6 +275,15 @@ func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
 			`i.id IN (SELECT issue_id FROM issue_tags WHERE tag IN (%s) GROUP BY issue_id HAVING COUNT(DISTINCT tag) = %d)`,
 			strings.Join(ph, ","), len(f.Tags),
 		))
+	}
+	if f.OnKanban != nil {
+		// The board-membership axis. A NULL kanban_column_id means the
+		// card is not on the Kanban at all — see the field's doc comment.
+		if *f.OnKanban {
+			where = append(where, "i.kanban_column_id IS NOT NULL")
+		} else {
+			where = append(where, "i.kanban_column_id IS NULL")
+		}
 	}
 	if !f.IncludeArchived {
 		// BACI-68: archived rows are hidden by default. The caller can
@@ -591,6 +617,176 @@ func (s *Store) ReorderIssue(issueID int64, position int) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// SetIssueKanbanColumn places a card on the human Kanban board, moves it
+// between lanes or within one, or takes it off the board entirely.
+//
+// columnID == nil takes the card OFF the Kanban: kanban_column_id is
+// cleared and kanban_position reset to 0. That NULL is the whole rule
+// that keeps the Kanban and the Agentic Pipeline from double-rendering
+// the same `todo` card — the Kanban only ever lists rows with a non-NULL
+// column (IssueFilter.OnKanban), so a git repo's issues stay on the
+// Pipeline Backlog only until someone opts them in.
+//
+// `position` is the 0-based top-to-bottom slot within the target lane,
+// clamped to [0, n] (n = the lane's current size, so n means "append").
+// The lane is renumbered to a dense 0..n-1 afterwards, and so is the
+// lane the card left. Unlike ReorderIssue's band this renumber does NOT
+// skip archived rows: kanban_position is pure ordering metadata that no
+// surface renders for a hidden card, and including everything keeps the
+// invariant total — no stale index survives to collide when a card is
+// unarchived.
+//
+// Sync bookkeeping — read before "fixing" the missing updated_at bump:
+// issues.updated_at is deliberately NOT touched. Board membership does
+// not serialise into issue.yaml (adding a key there would hard-fail an
+// older binary's entire sync run); it lives on the *container* side, in
+// the lane's own record. So the affected lane(s) get their updated_at
+// bumped instead — that is exactly the key the import-side conflict rule
+// resolves membership by.
+//
+// Returns ErrNotFound if the issue does not exist, and wraps ErrNotFound
+// if the target column does not. A column belonging to a different repo
+// than the issue is rejected outright: the FK alone would accept it, and
+// a cross-repo card would render on a board it does not belong to.
+func (s *Store) SetIssueKanbanColumn(issueID int64, columnID *int64, position int) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var (
+		repoID     int64
+		currentCol sql.NullInt64
+	)
+	err = tx.QueryRow(`SELECT repo_id, kanban_column_id FROM issues WHERE id = ?`, issueID).Scan(&repoID, &currentCol)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	if columnID == nil {
+		if _, err := tx.Exec(
+			`UPDATE issues SET kanban_column_id = NULL, kanban_position = 0 WHERE id = ?`, issueID,
+		); err != nil {
+			return err
+		}
+		if currentCol.Valid {
+			if err := renumberKanbanLaneTx(tx, currentCol.Int64, 0, -1); err != nil {
+				return err
+			}
+			if err := touchKanbanColumnTx(tx, currentCol.Int64); err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
+	}
+
+	var colRepoID int64
+	err = tx.QueryRow(`SELECT repo_id FROM kanban_columns WHERE id = ?`, *columnID).Scan(&colRepoID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("SetIssueKanbanColumn: kanban column %d: %w", *columnID, ErrNotFound)
+	}
+	if err != nil {
+		return err
+	}
+	if colRepoID != repoID {
+		return fmt.Errorf(
+			"SetIssueKanbanColumn: kanban column %d belongs to a different repo than issue %d",
+			*columnID, issueID,
+		)
+	}
+
+	if _, err := tx.Exec(`UPDATE issues SET kanban_column_id = ? WHERE id = ?`, *columnID, issueID); err != nil {
+		return err
+	}
+	if err := renumberKanbanLaneTx(tx, *columnID, issueID, position); err != nil {
+		return err
+	}
+	if err := touchKanbanColumnTx(tx, *columnID); err != nil {
+		return err
+	}
+	if currentCol.Valid && currentCol.Int64 != *columnID {
+		if err := renumberKanbanLaneTx(tx, currentCol.Int64, 0, -1); err != nil {
+			return err
+		}
+		if err := touchKanbanColumnTx(tx, currentCol.Int64); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// renumberKanbanLaneTx rewrites a lane's kanban_position values to a
+// dense 0..n-1 sequence. When moveID is non-zero that card is first
+// lifted out and re-inserted at `position` (0-based, clamped to
+// [0, n]); pass moveID = 0 (and any position) to simply re-densify a
+// lane whose membership changed underneath it.
+//
+// The lane's existing order is read as (kanban_position, number) —
+// `number` is the stable tie-break for the very first move into a lane,
+// where every member still carries the column default of 0.
+func renumberKanbanLaneTx(tx *sql.Tx, columnID, moveID int64, position int) error {
+	rows, err := tx.Query(
+		`SELECT id FROM issues WHERE kanban_column_id = ? ORDER BY kanban_position ASC, number ASC`, columnID,
+	)
+	if err != nil {
+		return err
+	}
+	var others []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		if id != moveID {
+			others = append(others, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	ordered := others
+	if moveID != 0 {
+		idx := position
+		if idx < 0 {
+			idx = 0
+		}
+		if idx > len(others) {
+			idx = len(others)
+		}
+		ordered = make([]int64, 0, len(others)+1)
+		ordered = append(ordered, others[:idx]...)
+		ordered = append(ordered, moveID)
+		ordered = append(ordered, others[idx:]...)
+	}
+	for i, id := range ordered {
+		// The `kanban_position <> ?` guard keeps an untouched card's row
+		// out of the write set entirely.
+		if _, err := tx.Exec(
+			`UPDATE issues SET kanban_position = ? WHERE id = ? AND kanban_position <> ?`, i, id, i,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// touchKanbanColumnTx bumps a lane's updated_at. Board membership is
+// carried by the lane record, not by the member card, so a card moving
+// in or out of a lane is a change to the LANE as far as sync's
+// last-writer-wins resolution is concerned.
+func touchKanbanColumnTx(tx *sql.Tx, columnID int64) error {
+	_, err := tx.Exec(`UPDATE kanban_columns SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, columnID)
+	return err
 }
 
 // nextCandidateQ picks the lowest-numbered ready issue in a feature: state='todo',
@@ -1019,7 +1215,8 @@ SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slu
            AND s.ended_at IS NULL
        ) AS taken,
        i.archived_at, i.terminal_at, i.base_branch,
-       i.priority, i.engine_mode, i.engine_pause_reason, i.created_at, i.updated_at
+       i.priority, i.kanban_column_id, i.kanban_position,
+       i.engine_mode, i.engine_pause_reason, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
 LEFT JOIN features f ON f.id = i.feature_id`
@@ -1036,12 +1233,14 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		archivedAt     sql.NullTime
 		terminalAt     sql.NullTime
 		baseBranch     sql.NullString
+		kanbanColumnID sql.NullInt64
 		engineMode     string
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji, &featBranchName,
 		&i.Title, &i.Description, &state, &i.Assignee, &i.CustomerImpact, &i.Taken,
 		&archivedAt, &terminalAt, &baseBranch,
-		&i.Priority, &engineMode, &i.EnginePauseReason, &i.CreatedAt, &i.UpdatedAt)
+		&i.Priority, &kanbanColumnID, &i.KanbanPosition,
+		&engineMode, &i.EnginePauseReason, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1076,6 +1275,13 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 	if baseBranch.Valid {
 		b := baseBranch.String
 		i.BaseBranch = &b
+	}
+	// NULL kanban_column_id => the card is not on the Kanban at all.
+	// Left as a nil pointer (json `omitempty`) rather than a zero id so
+	// "off the board" and "lane 0" can never be confused.
+	if kanbanColumnID.Valid {
+		v := kanbanColumnID.Int64
+		i.KanbanColumnID = &v
 	}
 	i.EngineMode = model.EngineMode(engineMode)
 	return &i, nil

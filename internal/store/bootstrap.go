@@ -29,7 +29,17 @@ const (
 // the user via `bacio settings default-feature`) is left untouched — we
 // never force the catch-alls onto a repo that has opted into its own
 // feature workflow.
+//
+// The Kanban seed runs BEFORE the default-feature early-return on purpose.
+// The two are independent axes: a repo that already carries a deliberate
+// default feature has never been given a Kanban board, and gating the seed
+// behind that return would leave every pre-existing repo boardless forever.
+// BootstrapKanbanColumns carries its own count-guard, so the unconditional
+// call stays a single cheap read once the board exists.
 func (s *Store) BootstrapRepoDefaults(repoID int64) error {
+	if err := s.BootstrapKanbanColumns(repoID); err != nil {
+		return err
+	}
 	settings, err := s.GetRepoSettings(repoID)
 	if err != nil {
 		return err
