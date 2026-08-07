@@ -5,7 +5,9 @@ import * as api from '../api';
 import type { Board, BoardColumn, BoardCard, AddRepositoryPayload } from '../api';
 import { reportError } from '../errors';
 import { readLocalStorage, writeLocalStorage } from '../lib/hooks/useLocalStorage';
-import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath, repoPrefixFromKey, homeView } from '../lib/routes';
+import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath, repoPrefixFromKey } from '../lib/routes';
+import { navFor, homeView, DEFAULT_SURFACES } from '../lib/nav';
+import type { NavSurfaces } from '../lib/nav';
 
 // RepoProvider (BACI-361) owns the repo-selection layer App.tsx used to
 // carry: the boards/columns list, the BACI-285 URL-derived active repo and
@@ -31,6 +33,18 @@ const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected rep
 // active prefix here, and App's LegacyFeaturesRedirect then forwards the
 // `/features` form on to `/epics`.
 const LEGACY_PAGE_WORDS = new Set(['pipeline', 'issues', 'epics', 'features', 'documents', 'agents', 'history', 'monitor']);
+
+// surfacesForPrefix resolves one space's nav-surface gates — which top-nav
+// tabs it exposes — for the home-view and redirect decisions below. A
+// prefix with no board yet (still loading, or unknown) falls back to
+// DEFAULT_SURFACES rather than the all-off zero value, so a slow load
+// never redirects away from a page that is actually available.
+function surfacesForPrefix(boards: Board[], prefix: string): NavSurfaces {
+  const space = boards.find(b => b.prefix === prefix);
+  return space
+    ? { showAgentSurfaces: space.showAgentSurfaces, showKanban: space.showKanban }
+    : DEFAULT_SURFACES;
+}
 
 // legacyPageWord reports whether the URL's first segment is one of the
 // recognised prefix-less page words — the signal that an unmatched prefix
@@ -133,17 +147,16 @@ export function RepoProvider({ children }: { children: ReactNode }) {
     return boards[0]?.prefix ?? '';
   })();
   // BACI-285: where a bare `/` or prefix-less legacy path redirects. Bare `/`
-  // → the fallback repo's home board (the Agentic Pipeline, or the Kanban for
-  // a workspace — a workspace hides the Pipeline nav entry, so landing there
-  // would strand the user). A legacy page link keeps its page path, rebased
-  // under the fallback prefix. An empty fallback (no repos) lands on bare `/`
-  // so the empty-state renders rather than a `//` path.
+  // → the fallback space's home view, which follows the nav surfaces that
+  // space actually exposes (landing on a hidden tab would strand the user
+  // with nothing highlighted). A legacy page link keeps its page path,
+  // rebased under the fallback prefix. An empty fallback (no repos) lands
+  // on bare `/` so the empty-state renders rather than a `//` path.
   const legacyRedirectTarget = (() => {
     if (!fallbackPrefix) return '/';
     const rest = location.pathname.replace(/^\/+/, '');
     if (rest && legacyPageWord(urlPrefix)) return `/${fallbackPrefix}/${rest}`;
-    const fallbackKind = boards.find(b => b.prefix === fallbackPrefix)?.kind;
-    return viewPath(fallbackPrefix, homeView(fallbackKind));
+    return viewPath(fallbackPrefix, homeView(surfacesForPrefix(boards, fallbackPrefix)));
   })();
 
   // BACI-203: derive the active view from the URL path. The Topbar reads the
@@ -156,18 +169,21 @@ export function RepoProvider({ children }: { children: ReactNode }) {
     if (activeBoard) writeLocalStorage(REPO_KEY, activeBoard);
   }, [activeBoard]);
 
-  // BACI-285: repo switch — picking a repo routes to it. Land on the same
-  // page in the new repo (the current view); the trailing entity segment on
-  // a detail route is naturally dropped because viewPath emits the list/page
-  // root only. Falls back to the target repo's home board when the current
-  // path isn't a known nav view (e.g. the repo-not-found screen itself) —
-  // and switching onto a workspace from the Agentic Pipeline lands on its
-  // Kanban, because the workspace has no Pipeline nav entry to highlight.
+  // BACI-285: repo switch — picking a space routes to it. Land on the same
+  // page in the new space where that page exists; the trailing entity
+  // segment on a detail route is naturally dropped because viewPath emits
+  // the list/page root only.
+  //
+  // "Where it exists" is now the general rule rather than the old Pipeline
+  // special case: switching from any tab onto a space that doesn't expose
+  // it lands on that space's home view, instead of a page with nothing
+  // highlighted and no way back.
   const pickBoard = useCallback((prefix: string) => {
     if (!prefix) return;
-    const home = homeView(boards.find(b => b.prefix === prefix)?.kind);
-    const currentView = viewFromPath(location.pathname) || home;
-    navigate(viewPath(prefix, currentView === 'pipeline' ? home : currentView));
+    const surfaces = surfacesForPrefix(boards, prefix);
+    const current = viewFromPath(location.pathname);
+    const survives = navFor(surfaces).some(item => item.view === current);
+    navigate(viewPath(prefix, survives ? current : homeView(surfaces)));
   }, [navigate, location.pathname, boards]);
 
   // BACI-203: navigate-by-key for prev/next sibling jumps, the kanban
@@ -205,8 +221,7 @@ export function RepoProvider({ children }: { children: ReactNode }) {
     if (window.history.state && window.history.length > 1) {
       navigate(-1);
     } else {
-      const kind = boards.find(b => b.prefix === activeBoard)?.kind;
-      navigate(viewPath(activeBoard, homeView(kind)));
+      navigate(viewPath(activeBoard, homeView(surfacesForPrefix(boards, activeBoard))));
     }
   }, [navigate, activeBoard, boards]);
 
@@ -242,7 +257,10 @@ export function RepoProvider({ children }: { children: ReactNode }) {
           setBoards(bs);
           // BACI-285: the active repo is URL-derived — route to the new
           // repo's home board so it becomes active.
-          navigate(viewPath(board.prefix, homeView(board.kind)));
+          navigate(viewPath(board.prefix, homeView({
+            showAgentSurfaces: board.showAgentSurfaces,
+            showKanban: board.showKanban,
+          })));
           return board;
         });
       })

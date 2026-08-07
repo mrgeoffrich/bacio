@@ -6,7 +6,8 @@ import Tooltip from './Tooltip';
 import NotificationBell from './NotificationBell';
 import ShippedPopover from './ShippedPopover';
 import { WEB_MODE } from '../env';
-import type { RepoKind } from '../api';
+import { navFor, DEFAULT_SURFACES } from '../lib/nav';
+import type { NavItem } from '../lib/nav';
 import { viewPath, viewFromPath } from '../lib/routes';
 import { syncBadgeState } from '../lib/syncBadge';
 import { useActiveRepo } from '../state/RepoProvider';
@@ -15,44 +16,6 @@ import { useCards } from '../state/CardsProvider';
 import { usePreferences } from '../state/PreferencesProvider';
 import { useLeaderStatus } from '../state/useLeaderStatus';
 import { useNotifications } from '../state/useNotifications';
-
-// NAV is the ordered top-nav. Exported so App can map the digit
-// hotkeys onto the same views in the same order. As of BACI-50 the
-// Agents tab is also available in web mode — the bacio api ships the
-// composite GET /agents/cards endpoint that assembles the AgentCard
-// shape server-side.
-//
-// The two boards sit side by side at the head of the list, and the labels
-// say which is which: "Agentic Pipeline" is the agent-driven lifecycle
-// (issue `state`), "Kanban" is the human work board (lanes, orthogonal to
-// state). Only the LABEL changed on the first entry — the `pipeline` view id
-// is load-bearing across routes.ts, App's routes and redirects,
-// RepoProvider's legacy page words, the `is-pipeline` shell class and
-// ProcessEditor's back-navigation.
-export type NavItem = { view: string; label: string };
-
-export const NAV: NavItem[] = [
-  { view: 'pipeline', label: 'Agentic Pipeline' },
-  { view: 'board', label: 'Kanban' },
-  { view: 'features', label: 'Epics' },
-  { view: 'docs', label: 'Documents' },
-  { view: 'agents', label: 'Agents' },
-  { view: 'history', label: 'History' },
-  { view: 'monitor', label: 'Monitor' },
-];
-
-// navForKind is the nav the active repo actually gets. A workspace has no
-// working tree, so a dispatched agent would have nowhere to work — the
-// Agentic Pipeline entry is hidden there (locked decision D1). The Kanban
-// entry is never hidden: it is the one board every repo kind has.
-//
-// Exported (and consumed by App as well as the render below) because the
-// digit hotkeys map onto this list by position — filtering it in only one of
-// the two places would silently desync the keyboard from the buttons.
-export function navForKind(kind?: RepoKind): NavItem[] {
-  if (kind !== 'workspace') return NAV;
-  return NAV.filter(item => item.view !== 'pipeline');
-}
 
 // BACI-361: the topbar reads its live data from the state hooks rather than
 // the ~18 props App used to drill in. Only the three shell-owned overlay
@@ -122,6 +85,39 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
   const busy = agentCounts?.busy ?? 0;
   const showAgentCounts = (available + busy) > 0;
   const agentCountsLabel = `${available} available, ${busy} busy`;
+  // Which tabs this space exposes. `board` is undefined while the board
+  // list loads, so fall back rather than flashing a stripped nav.
+  const items = navFor(board ?? DEFAULT_SURFACES);
+
+  const renderNavButton = (item: NavItem) => {
+    const isAgents = item.view === 'agents';
+    const button = (
+      <button
+        className={`mk-segmented-btn ${activeView === item.view ? 'is-active' : ''}`}
+        onClick={() => {
+          // BACI-285: no-op when no real repo is active (the
+          // repo-not-found / no-repos screen) so we don't navigate
+          // to a prefix-less `//<view>` path.
+          if (!activeBoard) return;
+          if (onBeforeNavigate) onBeforeNavigate();
+          navigate(viewPath(activeBoard, item.view));
+        }}
+      >
+        {item.label}
+        {isAgents && showAgentCounts && (
+          <span className="mk-agent-counts-badges" aria-label={agentCountsLabel}>
+            <span className="mk-pill mk-status-idle mk-agent-counts-available">{available}</span>
+            <span className="mk-pill mk-status-busy mk-agent-counts-busy">{busy}</span>
+          </span>
+        )}
+      </button>
+    );
+    if (isAgents && showAgentCounts) {
+      return <Tooltip key={item.view} label={agentCountsLabel}>{button}</Tooltip>;
+    }
+    return <React.Fragment key={item.view}>{button}</React.Fragment>;
+  };
+
   return (
     <header className={`mk-topbar${WEB_MODE ? ' is-web' : ''}`}>
       <div className="mk-brand">
@@ -129,35 +125,23 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
         <span className="mk-brand-name">bacio</span>
       </div>
 
+      {/* The agent-driven tabs (Agentic Pipeline / Agents / Monitor) sit
+          together and slightly apart from the rest. The divider is drawn
+          between consecutive items whose group differs, which means it
+          only appears when BOTH groups are non-empty — a space with
+          Agent Mode off never shows a dangling hairline. */}
       <div className="mk-segmented">
-        {navForKind(board?.kind).map(({ view, label }) => {
-          const isAgents = view === 'agents';
-          const button = (
-            <button
-              className={`mk-segmented-btn ${activeView === view ? 'is-active' : ''}`}
-              onClick={() => {
-                // BACI-285: no-op when no real repo is active (the
-                // repo-not-found / no-repos screen) so we don't navigate
-                // to a prefix-less `//<view>` path.
-                if (!activeBoard) return;
-                if (onBeforeNavigate) onBeforeNavigate();
-                navigate(viewPath(activeBoard, view));
-              }}
-            >
-              {label}
-              {isAgents && showAgentCounts && (
-                <span className="mk-agent-counts-badges" aria-label={agentCountsLabel}>
-                  <span className="mk-pill mk-status-idle mk-agent-counts-available">{available}</span>
-                  <span className="mk-pill mk-status-busy mk-agent-counts-busy">{busy}</span>
-                </span>
-              )}
-            </button>
-          );
-          if (isAgents && showAgentCounts) {
-            return <Tooltip key={view} label={agentCountsLabel}>{button}</Tooltip>;
-          }
-          return <React.Fragment key={view}>{button}</React.Fragment>;
-        })}
+        {items.map((item, i) => (
+          <React.Fragment key={item.view}>
+            {i > 0 && items[i - 1].group !== item.group && (
+              // A non-interactive span, so it keeps the topbar's
+              // --wails-draggable: drag (only button/input/select opt
+              // out) — dragging the window by a divider is fine.
+              <span className="mk-segmented-sep" aria-hidden="true" />
+            )}
+            {renderNavButton(item)}
+          </React.Fragment>
+        ))}
       </div>
 
       {openIssueKey && (

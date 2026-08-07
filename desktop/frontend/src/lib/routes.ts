@@ -14,8 +14,6 @@
 // model and the SPA-fallback contract on both the `bacio web` asset
 // server and the Wails AssetFileServerFS.
 
-import type { RepoKind } from '../api';
-
 // NAV view ids — kept in lockstep with Topbar.tsx's NAV array. Three
 // view ids are special-cased in viewPath below: their URL matches the
 // tab label rather than the internal name (`board` → `/issues`,
@@ -25,21 +23,9 @@ import type { RepoKind } from '../api';
 // words, the `mk-features-*` CSS and every component filename.
 export type NavView = 'pipeline' | 'board' | 'features' | 'docs' | 'agents' | 'history' | 'monitor';
 
-// homeView is the nav view a repo lands on when nothing more specific is
-// asked for — a bare `/`, a repo switch off a page that doesn't exist in the
-// new repo, closing an issue with an empty back stack, or the `/:prefix/*`
-// catch-all.
-//
-// A workspace has no working tree, so a dispatched agent would have nowhere
-// to work and the Agentic Pipeline nav entry is hidden for it (locked
-// decision D1). Landing a workspace on `pipeline` would therefore strand the
-// user on a page with no nav segment highlighted and no way back — so the
-// Kanban is home there instead. `kind` is compared against the string literal
-// rather than a Wails enum member: RepoKind is a string-literal union in the
-// contract precisely so this comparison survives the web build.
-export function homeView(kind?: RepoKind): NavView {
-  return kind === 'workspace' ? 'board' : 'pipeline';
-}
+// homeView lives in ./nav — it is defined in terms of which nav entries
+// a space actually exposes, so it belongs beside the nav data rather
+// than beside the path shapes.
 
 // viewPath maps a top-nav view id onto its base route under the active
 // repo prefix. Three view ids have URL aliases that match the top-nav

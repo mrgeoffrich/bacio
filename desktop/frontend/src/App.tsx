@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router';
-import Topbar, { navForKind } from './components/Topbar';
+import Topbar from './components/Topbar';
 import KanbanBoard from './components/kanban/KanbanBoard';
 import DocsView from './components/DocsView';
 import FeaturesView from './components/FeaturesView';
@@ -22,7 +23,9 @@ import { LazyMotion, domMax, LayoutGroup } from 'motion/react';
 import { reportError } from './errors';
 import * as api from './api';
 import type { BoardCard } from './api';
-import { viewPath, issuePath, homeView } from './lib/routes';
+import { viewPath, issuePath } from './lib/routes';
+import type { NavView } from './lib/routes';
+import { navFor, homeView, DEFAULT_SURFACES } from './lib/nav';
 import { PreferencesProvider, usePreferences } from './state/PreferencesProvider';
 import { RepoProvider, useActiveRepo } from './state/RepoProvider';
 import { AgentsProvider } from './state/AgentsProvider';
@@ -42,6 +45,31 @@ function isEditingTarget(el: EventTarget | null) {
   if (!(el instanceof HTMLElement)) return false;
   const tag = el.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+// SurfaceGate bounces a deep-link to a nav surface this space has
+// switched off back to the space's home view. Without it, hiding a tab
+// would only hide the button: a bookmark, a shared link or the back
+// button would still land on a page with no nav segment highlighted and
+// no obvious way out.
+//
+// Applied per-route rather than as one effect above <Routes> because
+// the active view is derived from the path, and viewFromPath
+// ('/BACI/issues/BACI-1') is 'board' — a path-agnostic guard would
+// evict the ISSUE WORKSPACE whenever Show Kanban was off. The workspace
+// route is deliberately ungated: it is reached from the Pipeline,
+// Epics, the command palette and notifications, none of which depend
+// on the Kanban tab being visible.
+type SurfaceGateProps = { view: NavView; children: ReactNode };
+
+function SurfaceGate({ view, children }: SurfaceGateProps) {
+  const { activeBoard, boards } = useActiveRepo();
+  const space = boards.find(b => b.prefix === activeBoard);
+  const surfaces = space
+    ? { showAgentSurfaces: space.showAgentSurfaces, showKanban: space.showKanban }
+    : DEFAULT_SURFACES;
+  if (navFor(surfaces).some(item => item.view === view)) return <>{children}</>;
+  return <Navigate to={viewPath(activeBoard, homeView(surfaces))} replace />;
 }
 
 // The Epics tab moved from `/<prefix>/features` to `/<prefix>/epics`.
@@ -88,12 +116,19 @@ function Shell() {
   // via the Topbar's `+` button or the ⌘N shortcut.
   const [composerOpen, setComposerOpen] = useState(false);
 
-  // The active repo's kind drives two things the shell owns: which nav the
-  // digit hotkeys map onto (a workspace hides the Agentic Pipeline entry, so
-  // the digits have to shift with the buttons — see Topbar.navForKind), and
-  // which view the `/:prefix/*` catch-all lands on.
-  const activeKind = boards.find(b => b.prefix === activeBoard)?.kind;
-  const navItems = useMemo(() => navForKind(activeKind), [activeKind]);
+  // The active space's nav-surface gates drive two things the shell owns:
+  // which nav the digit hotkeys map onto (the digits index the FILTERED
+  // list, and Topbar renders the same one, so filtering in only one place
+  // would desync the keyboard from the buttons), and which view the
+  // `/:prefix/*` catch-all lands on.
+  const activeSpace = boards.find(b => b.prefix === activeBoard);
+  const showAgentSurfaces = activeSpace?.showAgentSurfaces ?? DEFAULT_SURFACES.showAgentSurfaces;
+  const showKanban = activeSpace?.showKanban ?? DEFAULT_SURFACES.showKanban;
+  const surfaces = useMemo(
+    () => ({ showAgentSurfaces, showKanban }),
+    [showAgentSurfaces, showKanban],
+  );
+  const navItems = useMemo(() => navFor(surfaces), [surfaces]);
 
   // BACI-203 / BACI-285: derive the open issue key from the route — null when
   // we're not on an issue workspace. Drives the Escape-to-close branch below.
@@ -242,9 +277,11 @@ function Shell() {
             <Route
               path="/:prefix/pipeline"
               element={
-                <ErrorBoundary headline="Something went wrong in Pipeline" label="The Pipeline view crashed">
-                  <PipelineView onOpenComposer={() => setComposerOpen(true)} />
-                </ErrorBoundary>
+                <SurfaceGate view="pipeline">
+                  <ErrorBoundary headline="Something went wrong in Pipeline" label="The Pipeline view crashed">
+                    <PipelineView onOpenComposer={() => setComposerOpen(true)} />
+                  </ErrorBoundary>
+                </SurfaceGate>
               }
             />
             {/* BACI-294: the full-screen Edit Process editor reads the card's
@@ -253,9 +290,11 @@ function Shell() {
             <Route
               path="/:prefix/pipeline/:key/process"
               element={
-                <ErrorBoundary headline="Something went wrong in Edit Process" label="The Edit Process view crashed">
-                  <ProcessEditor />
-                </ErrorBoundary>
+                <SurfaceGate view="pipeline">
+                  <ErrorBoundary headline="Something went wrong in Edit Process" label="The Edit Process view crashed">
+                    <ProcessEditor />
+                  </ErrorBoundary>
+                </SurfaceGate>
               }
             />
             {/* The Kanban board — the human work axis, orthogonal to the
@@ -266,9 +305,11 @@ function Shell() {
             <Route
               path="/:prefix/issues"
               element={
-                <ErrorBoundary headline="Something went wrong in Kanban" label="The Kanban view crashed">
-                  <KanbanBoard />
-                </ErrorBoundary>
+                <SurfaceGate view="board">
+                  <ErrorBoundary headline="Something went wrong in Kanban" label="The Kanban view crashed">
+                    <KanbanBoard />
+                  </ErrorBoundary>
+                </SurfaceGate>
               }
             />
             {/* The workspace route self-sources its brief + writes via
@@ -321,9 +362,11 @@ function Shell() {
             <Route
               path="/:prefix/agents"
               element={
-                <ErrorBoundary headline="Something went wrong in Agents" label="The Agents view crashed">
-                  <AgentsView />
-                </ErrorBoundary>
+                <SurfaceGate view="agents">
+                  <ErrorBoundary headline="Something went wrong in Agents" label="The Agents view crashed">
+                    <AgentsView />
+                  </ErrorBoundary>
+                </SurfaceGate>
               }
             />
             <Route
@@ -337,9 +380,11 @@ function Shell() {
             <Route
               path="/:prefix/monitor"
               element={
-                <ErrorBoundary headline="Something went wrong in Monitor" label="The Monitor view crashed">
-                  <MonitorView activeBoard={activeBoard} />
-                </ErrorBoundary>
+                <SurfaceGate view="monitor">
+                  <ErrorBoundary headline="Something went wrong in Monitor" label="The Monitor view crashed">
+                    <MonitorView activeBoard={activeBoard} />
+                  </ErrorBoundary>
+                </SurfaceGate>
               }
             />
             {/* BACI-322: the Transcripts sub-tab is the same Monitor shell — it
@@ -347,18 +392,22 @@ function Shell() {
             <Route
               path="/:prefix/monitor/transcripts"
               element={
-                <ErrorBoundary headline="Something went wrong in Monitor" label="The Monitor view crashed">
-                  <MonitorView activeBoard={activeBoard} />
-                </ErrorBoundary>
+                <SurfaceGate view="monitor">
+                  <ErrorBoundary headline="Something went wrong in Monitor" label="The Monitor view crashed">
+                    <MonitorView activeBoard={activeBoard} />
+                  </ErrorBoundary>
+                </SurfaceGate>
               }
             />
             {/* BACI-322: the deep-linkable full-transcript page for one dispatch. */}
             <Route
               path="/:prefix/monitor/transcript/:id"
               element={
-                <ErrorBoundary headline="Something went wrong in the transcript view" label="The transcript view crashed">
-                  <TranscriptRoute />
-                </ErrorBoundary>
+                <SurfaceGate view="monitor">
+                  <ErrorBoundary headline="Something went wrong in the transcript view" label="The transcript view crashed">
+                    <TranscriptRoute />
+                  </ErrorBoundary>
+                </SurfaceGate>
               }
             />
             {/* Catch-all: an unknown page under a valid prefix lands on that
@@ -371,7 +420,7 @@ function Shell() {
               path="/:prefix/*"
               element={
                 <Navigate
-                  to={activeBoard ? viewPath(activeBoard, homeView(activeKind)) : legacyRedirectTarget}
+                  to={activeBoard ? viewPath(activeBoard, homeView(surfaces)) : legacyRedirectTarget}
                   replace
                 />
               }

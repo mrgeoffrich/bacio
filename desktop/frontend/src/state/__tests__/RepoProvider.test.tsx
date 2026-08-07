@@ -14,9 +14,15 @@ import { RepoProvider, useActiveRepo } from '../RepoProvider';
 const hoisted = vi.hoisted(() => ({ launchRepo: '' as string | null }));
 
 vi.mock('../../api', () => ({
+  // Two git repos on their default nav surfaces — agent tabs on, Kanban
+  // off — so homeView resolves to the Agentic Pipeline, as it does for a
+  // real git repo. The provider reads these gates off the board rows
+  // (they are required on the Board contract and filled by both
+  // transports), so a fixture that omitted them would resolve every
+  // space to "all tabs hidden".
   listBoards: vi.fn(() => Promise.resolve([
-    { prefix: 'BACI', name: 'bacio' },
-    { prefix: 'MINI', name: 'mini' },
+    { prefix: 'BACI', name: 'bacio', kind: 'git', showAgentSurfaces: true, showKanban: false },
+    { prefix: 'MINI', name: 'mini', kind: 'git', showAgentSurfaces: true, showKanban: false },
   ])),
   listColumns: vi.fn(() => Promise.resolve([])),
   getLaunchRepo: vi.fn(() => hoisted.launchRepo === null

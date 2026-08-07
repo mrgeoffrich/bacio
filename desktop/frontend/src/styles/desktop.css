@@ -442,6 +442,16 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   letter-spacing: 0;
 }
 
+/* Hairline setting the agent-driven tabs (Agentic Pipeline / Agents /
+   Monitor) slightly apart from the work tabs. Topbar renders it only
+   between consecutive items whose group differs, so a space with Agent
+   Mode off never draws a dangling divider. */
+.mk-segmented-sep {
+  width: 1px; align-self: stretch; flex-shrink: 0;
+  margin: 3px 5px;
+  background: var(--border-1);
+}
+
 /* Prompt-template editors — the second section of the Settings dialog.
    A stacked list of labelled textareas, one per dispatch stage. */
 .mk-settings-section {
