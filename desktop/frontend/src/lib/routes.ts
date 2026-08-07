@@ -95,6 +95,31 @@ export function featurePath(prefix: string, slug: string): string {
   return `/${prefix}/epics/${slug}`;
 }
 
+// newEpicPath is the full-screen New Epic form under the active repo
+// prefix — the same relationship processEditPath has to the Pipeline.
+//
+// `new` is a STATIC segment at the same depth as featurePath's `:slug`,
+// and react-router ranks a static segment above a dynamic one regardless
+// of declaration order, so this route always wins. The hazard runs the
+// other way: `store.Slugify("New")` is `"new"`, so an epic literally
+// slugged `new` would emit this very path from featurePath and become
+// unreachable. That is reserved CLIENT-SIDE only — the create form
+// refuses the slug and NewEpicPage bounces to the detail route if such an
+// epic already exists — because reserving it at the store boundary would
+// also constrain `bacio feature add` and could reject an already-existing
+// row on its next edit.
+export function newEpicPath(prefix: string): string {
+  return `/${prefix}/epics/new`;
+}
+
+// editEpicPath is the full-screen Edit Epic form for one epic. No
+// collision hazard here: ValidateSlug forbids `/`, so a slug can never
+// swallow the trailing segment, and the deeper path outranks the
+// shallower `/:prefix/epics/:slug` unconditionally.
+export function editEpicPath(prefix: string, slug: string): string {
+  return `/${prefix}/epics/${slug}/edit`;
+}
+
 // documentPath maps a doc filename onto its detail route under the
 // active repo prefix. Filenames are the canonical slug for docs
 // (per-repo unique) and may include dots — encodeURIComponent keeps the

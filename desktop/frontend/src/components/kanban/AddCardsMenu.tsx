@@ -37,15 +37,25 @@ import type { BoardCard } from '../../api';
 // and tell the user to keep typing — the search is the real navigation.
 const MAX_ROWS = 50;
 
+// The pinned create row's index in the highlight space shared with the
+// result rows. Negative rather than 0 so the result rows keep their
+// natural 0-based indices and the existing `add`/clamp bookkeeping is
+// untouched.
+const CREATE_ROW = -1;
+
 type AddCardsMenuProps = {
   laneName: string;
   // Every card in the repo that no lane holds, already derived by the
   // board. Empty is a legitimate state (everything is already placed).
   candidates: BoardCard[];
   onAdd: (key: string) => void;
+  // Open the lane-scoped composer. The popover CLOSES first — every other
+  // row here deliberately stays open for multi-add, and that difference is
+  // itself a signal that create is a different kind of action.
+  onCreate: () => void;
 };
 
-export default function AddCardsMenu({ laneName, candidates, onAdd }: AddCardsMenuProps) {
+export default function AddCardsMenu({ laneName, candidates, onAdd, onCreate }: AddCardsMenuProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -53,9 +63,12 @@ export default function AddCardsMenu({ laneName, candidates, onAdd }: AddCardsMe
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          className="mk-col-add-btn"
-          aria-label={`Add cards to ${laneName}`}
-          title={`Add cards to ${laneName}`}
+          className="mk-create-btn"
+          // The trigger now carries two verbs, so it says both. Widening
+          // the popover to include create is exactly why this label
+          // changed from "Add cards to …".
+          aria-label={`Add or create cards in ${laneName}`}
+          title={`Add or create cards in ${laneName}`}
         >
           <Plus size={14} strokeWidth={2} aria-hidden="true" />
         </button>
@@ -74,6 +87,7 @@ export default function AddCardsMenu({ laneName, candidates, onAdd }: AddCardsMe
             laneName={laneName}
             candidates={candidates}
             onAdd={onAdd}
+            onCreate={onCreate}
             onDone={() => setOpen(false)}
           />
         </DropdownMenu.Content>
@@ -86,10 +100,11 @@ type AddCardsMenuBodyProps = {
   laneName: string;
   candidates: BoardCard[];
   onAdd: (key: string) => void;
+  onCreate: () => void;
   onDone: () => void;
 };
 
-function AddCardsMenuBody({ laneName, candidates, onAdd, onDone }: AddCardsMenuBodyProps) {
+function AddCardsMenuBody({ laneName, candidates, onAdd, onCreate, onDone }: AddCardsMenuBodyProps) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -101,7 +116,15 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onDone }: AddCardsMenuB
   // Clamp at render rather than in an effect: the list shrinks under the
   // highlight on every keystroke AND on every successful add, and a
   // corrective effect would render one frame pointing past the end.
-  const activeIndex = visible.length === 0 ? 0 : Math.min(active, visible.length - 1);
+  //
+  // CREATE_ROW (-1) is the pinned create row's slot in the same highlight
+  // space as the result rows, which is what lets ↑ from the first result
+  // park on it and ⏎ fire it. With no candidates at all it is the only
+  // actionable thing in the panel, so the highlight rests there.
+  const activeIndex =
+    active <= CREATE_ROW ? CREATE_ROW
+      : visible.length === 0 ? CREATE_ROW
+        : Math.min(active, visible.length - 1);
 
   // Focus the search input on mount. This is also what keeps Radix's
   // focus scope out of the way: FocusScope only steals focus when nothing
@@ -114,8 +137,16 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onDone }: AddCardsMenuB
 
   const highlight = (index: number) => {
     setActive(index);
+    if (index === CREATE_ROW) return; // pinned; nothing to scroll to
     const row = listRef.current?.children[index];
     if (row instanceof HTMLElement) row.scrollIntoView({ block: 'nearest' });
+  };
+
+  // Create closes the popover, unlike every placement row below it. That
+  // asymmetry is deliberate — see the trigger comment.
+  const create = () => {
+    onCreate();
+    onDone();
   };
 
   const add = (key: string) => {
@@ -140,18 +171,32 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onDone }: AddCardsMenuB
     // focus out of this input and onto a row that happens to start with
     // the letter just typed.
     e.stopPropagation();
+    // The highlight cycles over [create row, ...results] as one ring, so
+    // ↓ off the last result lands back on create and ↑ off the first
+    // result parks on it — which is the fourth of the four signals
+    // separating "make a new card here" from "place an existing one".
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (visible.length > 0) highlight((activeIndex + 1) % visible.length);
+      if (visible.length === 0) return;
+      if (activeIndex === CREATE_ROW) highlight(0);
+      else if (activeIndex === visible.length - 1) highlight(CREATE_ROW);
+      else highlight(activeIndex + 1);
       return;
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      if (visible.length > 0) highlight((activeIndex - 1 + visible.length) % visible.length);
+      if (visible.length === 0) return;
+      if (activeIndex === CREATE_ROW) highlight(visible.length - 1);
+      else if (activeIndex === 0) highlight(CREATE_ROW);
+      else highlight(activeIndex - 1);
       return;
     }
     if (e.key === 'Enter') {
       e.preventDefault();
+      if (activeIndex === CREATE_ROW) {
+        create();
+        return;
+      }
       const choice = visible[activeIndex];
       if (choice) add(choice.key);
     }
@@ -159,6 +204,28 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onDone }: AddCardsMenuB
 
   return (
     <div className="mk-dispatch-menu" onClick={(e) => e.stopPropagation()}>
+      {/* The create row is PINNED at the very top, above the search, and
+          its label is CONSTANT — it does not echo the query. Four
+          independent signals keep the two zones apart: position (above vs
+          below the search), colour (the only tinted row in the panel),
+          verb ("New issue in …" vs "Place an existing issue"), and
+          keyboard (↑ from the first result parks here; ⏎ fires it).
+
+          Above the search rather than below the results because an EMPTY
+          lane is the case this whole affordance exists for, and a
+          bottom-anchored row would be sixth in reading order behind a
+          scrolling list. It also survives the zero-candidate case, where a
+          footer row would be the only content and read strangely. */}
+      <DropdownMenu.Item
+        className={`mk-card-action-item mk-create-menu-new${activeIndex === CREATE_ROW ? ' is-active' : ''}`}
+        onSelect={create}
+        onMouseMove={() => setActive(CREATE_ROW)}
+      >
+        <Plus size={13} strokeWidth={2} aria-hidden="true" />
+        <span>New issue in “{laneName}”…</span>
+        <span className="mk-create-menu-new-hint">⏎</span>
+      </DropdownMenu.Item>
+      <div className="mk-card-action-sep" />
       <div className="mk-dispatch-menu-search-row">
         <input
           ref={inputRef}
@@ -171,7 +238,12 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onDone }: AddCardsMenuB
           onKeyDown={onKeyDown}
         />
       </div>
-      <div className="mk-card-action-menu-label">Add to {laneName}</div>
+      {/* Names the VERB rather than repeating the lane name the create row
+          has already used — the two zones must not read as two spellings
+          of the same thing. */}
+      <div className="mk-card-action-menu-label">
+        Place an existing issue · {candidates.length} off the board
+      </div>
       <div className="mk-dispatch-menu-list" ref={listRef}>
         {visible.length === 0 ? (
           <div className="mk-dispatch-menu-empty">

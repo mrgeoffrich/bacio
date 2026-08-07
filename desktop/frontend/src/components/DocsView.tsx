@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { reportError } from '../errors';
 import * as api from '../api';
 import type { DocContent, DocFolder, DocSummary, DisplayPreferencesDTO, RepoKind } from '../api';
@@ -74,6 +74,7 @@ type DocsViewProps = {
 
 export default function DocsView({ activeBoard, onOpenIssue }: DocsViewProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { slug: slugParam } = useParams();
   const decodedSlug = slugParam ? decodeURIComponent(slugParam) : null;
   // Global repo state, read from the provider rather than prop-drilled: the
@@ -284,6 +285,24 @@ export default function DocsView({ activeBoard, onOpenIssue }: DocsViewProps) {
     selectedFolder,
     expandFolders,
   });
+
+  // The Topbar's global "New page" row can't open this dialog directly —
+  // the dialog needs the folder tree, which only lives here. So the menu
+  // routes to `…/documents?new=page` and this effect picks the flag up and
+  // opens the dialog at the tree ROOT (the global menu has no folder
+  // context to carry; the per-node and folder-page entries are the ones
+  // that do). The param is stripped immediately so a reload or a Back
+  // doesn't re-open it.
+  const requestNewPage = actions.requestNewPage;
+  useEffect(() => {
+    if (!repoSelected) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get('new') !== 'page') return;
+    params.delete('new');
+    const rest = params.toString();
+    navigate({ pathname: location.pathname, search: rest ? `?${rest}` : '' }, { replace: true });
+    requestNewPage('');
+  }, [location.pathname, location.search, navigate, repoSelected, requestNewPage]);
 
   const onDropMove = useCallback((item: DocsDragItem, target: DocsDropTarget) => {
     if (item.kind === 'doc') {

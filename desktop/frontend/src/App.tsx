@@ -5,6 +5,8 @@ import Topbar from './components/Topbar';
 import KanbanBoard from './components/kanban/KanbanBoard';
 import DocsView from './components/DocsView';
 import FeaturesView from './components/FeaturesView';
+import NewEpicPage from './components/features/NewEpicPage';
+import EditEpicPage from './components/features/EditEpicPage';
 import AgentsView from './components/AgentsView';
 import HistoryView from './components/HistoryView';
 import MonitorView from './components/MonitorView';
@@ -249,6 +251,7 @@ function Shell() {
           onBeforeNavigate={() => { setSettingsOpen(false); setSettingsInitialSection(null); }}
           onOpenSettings={() => { setSettingsInitialSection(null); setSettingsOpen(true); }}
           onOpenSync={openSync}
+          onOpenComposer={() => setComposerOpen(true)}
         />
         {loading ? (
           <div className="mk-app-state">Loading…</div>
@@ -330,11 +333,34 @@ function Shell() {
                 </ErrorBoundary>
               }
             />
+            {/* The full-screen New Epic form. react-router ranks a static
+                segment above a dynamic one at the same depth, so this wins
+                over `/:prefix/epics/:slug` wherever it is declared — it sits
+                immediately above it for the reader, not for the router. */}
+            <Route
+              path="/:prefix/epics/new"
+              element={
+                <ErrorBoundary headline="Something went wrong in New Epic" label="The New Epic view crashed">
+                  <NewEpicPage />
+                </ErrorBoundary>
+              }
+            />
             <Route
               path="/:prefix/epics/:slug"
               element={
                 <ErrorBoundary headline="Something went wrong in Epics" label="The Epics view crashed">
                   <FeaturesView />
+                </ErrorBoundary>
+              }
+            />
+            {/* The full-screen Edit Epic form. No collision hazard: a slug
+                can never contain `/`, so the deeper path outranks the
+                `:slug` route unconditionally. */}
+            <Route
+              path="/:prefix/epics/:slug/edit"
+              element={
+                <ErrorBoundary headline="Something went wrong in Edit Epic" label="The Edit Epic view crashed">
+                  <EditEpicPage />
                 </ErrorBoundary>
               }
             />

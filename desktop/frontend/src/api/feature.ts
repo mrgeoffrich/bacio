@@ -1,8 +1,54 @@
 // Feature-domain Wails calls (BACI-359): feature reads, the property
 // toggles, the dependency-graph plan, and feature comments.
 import { FeatureService } from '../../bindings/github.com/mrgeoffrich/bacio/desktop';
-import type { FeatureSummary, FeatureDetail, FeaturePlan } from './contract';
+import type { FeatureSummary, FeatureDetail, FeaturePlan, FeatureUpdateFields } from './contract';
 import { normalize } from './normalize';
+
+// createFeature backs the New Epic page. An empty slug is derived from
+// the title server-side by store.Slugify (mirrored client-side by
+// components/features/epicForm.deriveSlug for the live preview, with the
+// server staying authoritative). description / emoji / branchName are all
+// optional — pass '' to omit. Returns the created epic's full
+// FeatureDetail so the caller can route straight to it.
+export async function createFeature(
+  repoPrefix: string,
+  title: string,
+  slug: string,
+  description: string,
+  emoji: string,
+  branchName: string,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.CreateFeature(repoPrefix, title, slug, description, emoji, branchName);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// updateFeature is the Edit Epic page's batched Details save: title,
+// description, emoji and branch in ONE round trip, which is the shape the
+// backend has always spoken (PATCH decodes a presence map; the Wails
+// method takes four *string). An omitted field maps to `null` — the
+// binding's spelling of "no change" — so the four per-field setters above
+// stay the special case, not this.
+export async function updateFeature(
+  repoPrefix: string,
+  slug: string,
+  fields: FeatureUpdateFields,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.UpdateFeature(
+      repoPrefix,
+      slug,
+      fields.title ?? null,
+      fields.description ?? null,
+      fields.emoji ?? null,
+      fields.branchName ?? null,
+    );
+  } catch (err) {
+    throw normalize(err);
+  }
+}
 
 export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]> {
   try {

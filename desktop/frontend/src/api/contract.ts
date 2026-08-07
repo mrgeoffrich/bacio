@@ -800,6 +800,24 @@ export interface FeatureDetail {
   hiddenOnBoard: boolean;
 }
 
+// FeatureUpdateFields is the Edit Epic page's batched save payload — the
+// four content fields `PATCH /repos/{prefix}/features/{slug}` has always
+// accepted together. It is INPUT ONLY: the response is the existing
+// FeatureDetail, so there is no new response DTO.
+//
+// Presence, not value. An ABSENT key means "no change"; a key present as
+// an empty string means "clear this field" (an empty branchName puts the
+// epic back to shipping against main). Both transports must therefore
+// build their request body from only the keys the caller actually
+// supplied — never spread an object carrying `undefined` members, which
+// JSON.stringify happens to drop today but is not a contract.
+export interface FeatureUpdateFields {
+  title?: string;
+  description?: string;
+  emoji?: string;
+  branchName?: string;
+}
+
 // ─── History ─────────────────────────────────────────────────────────
 
 export interface HistoryEntryDTO {

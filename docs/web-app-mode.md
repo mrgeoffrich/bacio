@@ -191,6 +191,8 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 | `listProxyStats(sinceDays)` | `GET /proxy/stats?since=` (BACI-304) | The Monitor screen's per-FQDN reverse-proxy rollup. **Cross-cutting** — `proxy_requests` has no `repo_id`, so this is the rare seam method that takes no repo prefix; the endpoint is the cross-cutting sibling of `/history`, behind the bearer-token auth (outside the `/anthropic/` exemption). `sinceDays=0` is the "All-time" sentinel (omit `?since=`); a positive value maps to the rolling `?since=Nd` lookback. Reshapes the server's snake_case `ProxyFQDNStat` rows into the camelCase shape `MonitorView` consumes. Wails twin is `MonitorService.ProxyStats`. |
 | `listJobTranscripts(repo, issue, mode, sinceDays)` | `GET /proxy/jobs?repo=&issue=&mode=&since=` (BACI-322) | The Monitor Transcript page's row-per-dispatch list. Unlike `listProxyStats` this **is** active-repo scoped — `proxy_messages` has no `repo_id`, but each dispatch resolves to a repo prefix, so `repo` (the URL prefix) drives the scope and `issue` / `mode` narrow further. `sinceDays=0` is the "All-time" sentinel. Reshapes the snake_case `JobTranscriptRow` rows into the camelCase shape `TranscriptListPanel` consumes. Wails twin is `MonitorService.ListJobTranscripts`. |
 | `addWorkspace(name, prefix?)` | `POST /workspaces` | Creates a **workspace** — a pathless, git-less `repos` row (`kind='workspace'`). A dedicated route rather than a `kind` flag on `POST /repos`: the git path requires a `path`, the workspace path forbids one, and the store rejects the impossible combination. Body is `{name, prefix?}`; an omitted prefix is derived from the name. Wails twin is `BoardService.AddWorkspace`. |
+| `createFeature(p, title, slug, description, emoji, branchName)` | `POST /repos/{p}/features` | The New Epic page's create. `slug` is optional — pass `''` and the server derives it with `store.Slugify(title)` (mirrored client-side by `components/features/epicForm.deriveSlug` for the live preview only; the server stays authoritative). The handler decodes with `inputio.DecodeStrict`, so the body carries **exactly** `{title, slug?, description?, emoji?, branch_name?}` and the HTTP twin omits empty optionals rather than sending `""`. 201 answers with a bare `model.Feature`, so the twin re-reads through `getFeature` to hand back a `FeatureDetail`. 409 on a duplicate slug (the message is the raw SQLite `UNIQUE constraint failed` text — the page pre-checks its loaded list and keeps a friendly fallback for the race). Wails twin is `FeatureService.CreateFeature`. |
+| `updateFeature(p, slug, fields)` | `PATCH /repos/{p}/features/{slug}` | The Edit Epic page's batched **Details** save: `title` / `description` / `emoji` / `branchName` in ONE round trip, which is the shape the backend has always spoken. `FeatureUpdateFields` is **presence, not value** — an absent key is "no change", a key present as `''` is "clear this field" (an empty `branchName` puts the epic back to shipping against `main`). Both transports build the body key by key; never spread an object carrying `undefined` members. The four per-field setters (`setFeatureEmoji` / `setFeatureBranchName` / `setFeatureDescription`, and the state / auto-close / handoffs / hide PUTs) stay for the detail pane's inline affordances. Wails twin is `FeatureService.UpdateFeature`, whose four `*string` params bind as `string \| null`. |
 | `listKanbanColumns(prefix)` | `GET /repos/{p}/kanban/columns` | The Kanban lanes with their ordered `cards: [{key, position}]`. `cards` is **always present** (`[]` for an empty lane). Membership rides on the lane, so there is no per-issue lane field to fetch. |
 | `createKanbanColumn(prefix, name)` | `POST /repos/{p}/kanban/columns` | 201 with the new lane, appended to the right. 409 on a duplicate name in the repo. |
 | `renameKanbanColumn(prefix, uuid, name)` / `reorderKanbanColumn(prefix, uuid, position)` | `PATCH /repos/{p}/kanban/columns/{uuid}` | One route, a **presence map** body: the key that is present selects the operation (`{name}` renames, `{position}` reorders). Both-or-neither is a 400. `reorderKanbanColumn` re-reads the board afterwards — see §2a of [`frontend-architecture.md`](frontend-architecture.md). |
@@ -434,6 +436,20 @@ truth for the active repo** — `App` derives the active repo from
     mounted, on a `LegacyFeaturesRedirect` that rewrites the page segment
     in place (preserving slug, query and hash) so pre-rename links keep
     working.
+  - `/:prefix/epics/new` → `NewEpicPage`, and `/:prefix/epics/:slug/edit`
+    → `EditEpicPage` — two full-screen sub-routes that *replace* the
+    two-pane Epics layout, the same relationship `/:prefix/pipeline/:key/process`
+    has to the Pipeline. `new` is a **static** segment at the same depth
+    as `:slug`, and react-router ranks static above dynamic, so it wins
+    wherever it is declared (it sits immediately above `:slug` for the
+    reader, not for the router). The hazard runs the other way:
+    `store.Slugify("New")` is `"new"`, so an epic slugged `new` would be
+    shadowed by the create page forever. That is reserved **client-side
+    only** — `RESERVED_SLUGS` in `components/features/epicForm.ts` plus a
+    route guard on `NewEpicPage` — because reserving it in
+    `store.ValidateSlug` would also constrain `bacio feature add` and
+    could reject an already-existing row on its next edit. **No
+    store-boundary change, so no sync-manifest impact.**
   - `/:prefix/documents`, `/:prefix/documents/:slug` → `DocsView` with
     the filename pre-selected. The `:slug` segment carries a
     `documentPath`-encoded filename, so dots / unusual characters

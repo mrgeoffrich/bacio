@@ -7,11 +7,11 @@ import { issuePath } from '../../lib/routes';
 import {
   AUTO_CLOSE_OPTIONS,
   COLLECT_HANDOFFS_OPTIONS,
-  FEATURE_STATE_OPTIONS,
   SHOW_ON_BOARD_OPTIONS,
 } from './constants';
 import { useFeaturePropertyUpdate } from './useFeaturePropertyUpdate';
 import FeaturePropertyToggle from './FeaturePropertyToggle';
+import FeatureStateControl from './FeatureStateControl';
 import FeatureBranchEditor from './FeatureBranchEditor';
 import FeatureLinkedDocsSection from './FeatureLinkedDocsSection';
 import FeatureCommentsSection from './FeatureCommentsSection';
@@ -48,36 +48,7 @@ export default function FeatureOverviewSections({
   return (
     <>
       <section className="mk-features-properties">
-        <div className="mk-features-prop">
-          <label className="mk-features-prop-label">State</label>
-          <div
-            className="mk-segmented"
-            role="group"
-            aria-label="Epic state"
-          >
-            {FEATURE_STATE_OPTIONS.map((opt) => {
-              const current = detail.state || 'active';
-              return (
-                <button
-                  key={opt.id}
-                  className={`mk-segmented-btn ${
-                    current === opt.id ? 'is-active' : ''
-                  }`}
-                  aria-pressed={current === opt.id}
-                  onClick={() => {
-                    if (current === opt.id) return;
-                    update({
-                      persist: () => api.setFeatureState(activeBoard, detail.slug, opt.id),
-                      errorHeadline: "Couldn't update state",
-                    });
-                  }}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <FeatureStateControl activeBoard={activeBoard} detail={detail} update={update} />
 
         <FeaturePropertyToggle
           label="Auto Close"

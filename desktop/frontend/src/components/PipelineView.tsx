@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { AnimatePresence, m } from 'motion/react';
 import Icon from './Icon';
 import Tooltip from './Tooltip';
+import { ScopedCreateButton } from './CreateMenu';
 import QuestionModal from './QuestionModal';
 import PipelineCard from './pipeline/PipelineCard';
 import StageCard from './pipeline/StageCard';
@@ -166,17 +167,17 @@ export default function PipelineView({ onOpenComposer }: PipelineViewProps) {
                   topbar (which now holds the notification bell). Gated on a
                   real prefix — the composer needs one to create against —
                   same gate the topbar used. */}
+              {/* Behaviour, tooltip and gate all unchanged — only the
+                  chrome moves to the shared `.mk-create-btn`, so the glyph
+                  size, box, radius and hover match the Kanban lane `+` and
+                  the Epics `+`. The Backlog accepts one type, so it stays
+                  a plain button rather than a menu. */}
               {onOpenComposer && activeBoard && activeBoard !== 'all' && (
-                <Tooltip label="New issue (⌘N)">
-                  <button
-                    type="button"
-                    className="mk-pl-new-issue"
-                    aria-label="New issue"
-                    onClick={onOpenComposer}
-                  >
-                    <Icon name="plus" />
-                  </button>
-                </Tooltip>
+                <ScopedCreateButton
+                  label="New issue"
+                  tooltip="New issue (⌘N)"
+                  onClick={onOpenComposer}
+                />
               )}
               <button
                 type="button"
