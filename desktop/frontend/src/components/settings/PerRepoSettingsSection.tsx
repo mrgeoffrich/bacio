@@ -1,53 +1,49 @@
 import { useState, useEffect, useCallback } from 'react';
 import { reportError } from '../../errors';
 import * as api from '../../api';
-import type { Board, BoardColumn, FeatureSummary } from '../../api';
+import type { BoardColumn, FeatureSummary } from '../../api';
+import { useActiveRepo } from '../../state/RepoProvider';
 
-// BACI-248: Per-repository Settings section — fenced-off pane behind
-// its own repo dropdown for the per-repo settings that used to share
-// the flat scroll with the global System rows. Three sub-bands today:
+// The active space's own settings — the lead section of the Settings
+// page. Sub-bands, in order:
 //
-//   1. Default feature (BACI-235) — lifted down from System; the
-//      auto-applied feature for `bacio issue add` with no --feature-slug.
-//   2. Board visibility — hidden columns / states (`tui_settings[board.hidden_states]`,
-//      surfaced from TUI-only to desktop / web via the new
-//      /repos/{prefix}/board/hidden-states endpoint pair).
-//   3. Board visibility — hidden features (`tui_settings[board.hidden_features]`,
-//      already exposed on the Features screen via the BACI-177
-//      features/hidden endpoint; same flag, second surface.)
+//   1. Nav surfaces — the two gates deciding which top-nav tabs this
+//      space exposes ("Agent Mode" and "Show Kanban Board"). First
+//      because they change the shape of the whole app for this space.
+//   2. Default epic (BACI-235) — the auto-applied feature for
+//      `bacio issue add` with no --feature-slug.
+//   3. Board visibility — hidden columns / states
+//      (`tui_settings[board.hidden_states]`).
+//   4. Board visibility — hidden epics (`tui_settings[board.hidden_features]`,
+//      the same flag the Epics screen's "Show on board" toggle writes).
 //
-// The repo dropdown at the head defaults to the App-owned activeBoard.
-// Switching repos re-runs every effect under it, scoped by repoPrefix.
-//
-// When the dropdown is unset / "all" the section renders an empty
-// state — mirrors how FeaturesView empty-states a cross-repo view.
+// It reads the active space from useActiveRepo() rather than taking it
+// as a prop, and has no picker of its own. It used to carry a repo
+// <select> that defaulted to the topbar's choice but could then be
+// changed independently — a second notion of "the space I am editing"
+// that the heading and the topbar could silently disagree about. The
+// rail entry names the space instead; switch spaces from the topbar.
+
+// Same Off/On segmented pair the System section uses for its boolean
+// preferences, so the two pages read alike.
+const ON_OFF_OPTIONS = [
+  { id: false, label: 'Off' },
+  { id: true, label: 'On' },
+];
 
 type PerRepoSettingsSectionProps = {
-  activeBoard: string;
-  boards: Board[];
   columns: BoardColumn[];
 };
 
 export default function PerRepoSettingsSection({
-  activeBoard,
-  boards,
   columns,
 }: PerRepoSettingsSectionProps) {
-  // The pane's local repo selection. Defaults to the App-owned active
-  // board on mount + when the App switches repos; the user can pick a
-  // different repo without changing the global selection.
-  const [repoPrefix, setRepoPrefix] = useState(activeBoard || '');
-  useEffect(() => {
-    if (activeBoard) setRepoPrefix(activeBoard);
-  }, [activeBoard]);
-
-  // Resolve the row for the dropdown's display (name + prefix). Fallback
-  // shape keeps the rest of the pane resilient to an out-of-sync board
-  // list (e.g. when the user just added a repo and the dropdown hasn't
-  // refreshed yet).
-  const selectableBoards = Array.isArray(boards)
-    ? boards.filter(b => b && b.prefix && b.prefix !== 'all')
-    : [];
+  const { activeBoard, boards, patchBoard } = useActiveRepo();
+  const repoPrefix = activeBoard;
+  // The board row backs the heading (name) and seeds the two nav-surface
+  // toggles. Absent only in the brief window before the board list
+  // lands, or when no space is selected at all.
+  const board = boards.find(b => b.prefix === repoPrefix);
 
   // BACI-235: per-repo default-feature. defaultFeatureSlug is the
   // empty-string sentinel when unset; featureChoices is the list
@@ -174,52 +170,109 @@ export default function PerRepoSettingsSection({
     }
   }, [repoPrefix]);
 
+  // Flip one nav-surface gate. Optimistic: patchBoard updates the
+  // provider's board list immediately so the topbar nav reflects the
+  // change in the same tick, then the write is awaited and rolled back
+  // on failure. The nav renders off `boards`, so this is the whole
+  // update path — no refetch (web-mode listBoards is N+1).
+  const [savingSurface, setSavingSurface] = useState('');
+  const toggleSurface = useCallback(async (
+    field: 'showAgentSurfaces' | 'showKanban',
+    next: boolean,
+  ) => {
+    if (!repoPrefix || savingSurface) return;
+    setSavingSurface(field);
+    patchBoard(repoPrefix, { [field]: next });
+    try {
+      if (field === 'showKanban') await api.setShowKanban(repoPrefix, next);
+      else await api.setShowAgentSurfaces(repoPrefix, next);
+    } catch (err) {
+      patchBoard(repoPrefix, { [field]: !next });
+      reportError(err, {
+        headline: field === 'showKanban'
+          ? "Couldn't save the Kanban setting"
+          : "Couldn't save Agent Mode",
+      });
+    } finally {
+      setSavingSurface('');
+    }
+  }, [repoPrefix, patchBoard, savingSurface]);
+
   const repoChosen = !!repoPrefix && repoPrefix !== 'all';
 
   return (
     <div className="mk-settings-section-pane">
       <header className="mk-settings-section-head">
-        <h3 className="mk-settings-section-title">Per-repository</h3>
+        <h3 className="mk-settings-section-title">
+          {board ? `${board.name} · ${board.prefix}` : 'Space'}
+        </h3>
         <p className="mk-settings-section-subtitle">
-          Settings that apply to one repo. Defaults to the repository
-          you have selected in the topbar; switch from the dropdown to
-          edit another.
+          Settings that apply only to this space. Switch spaces from the
+          picker in the topbar.
         </p>
       </header>
 
-      <section className="mk-settings-row mk-settings-repo-row">
-        <div className="mk-settings-row-text">
-          <div className="mk-settings-label">Repository</div>
-          <div className="mk-settings-hint">
-            The repo every setting in this section applies to.
-          </div>
-        </div>
-        <select
-          className="mk-tmpl-input"
-          value={repoChosen ? repoPrefix : ''}
-          aria-label="Repository for per-repo settings"
-          onChange={e => setRepoPrefix(e.target.value)}
-        >
-          {!repoChosen && <option value="">(none selected)</option>}
-          {selectableBoards.map(b => (
-            <option key={b.prefix} value={b.prefix}>
-              {b.name} · {b.prefix}
-            </option>
-          ))}
-        </select>
-      </section>
-
       {!repoChosen ? (
         <div className="mk-settings-section-empty">
-          Select a repository above (or from the topbar) to edit its
-          per-repo settings.
+          Select a space from the topbar to edit its settings.
         </div>
       ) : (
         <>
+          {/* The nav-surface gates lead: they change which tabs this
+              space has at all, so they frame everything below them. */}
+          <section className="mk-settings-row">
+            <div className="mk-settings-row-text">
+              <div className="mk-settings-label">Agent Mode</div>
+              <div className="mk-settings-hint">
+                Shows the Agentic Pipeline, Agents and Monitor tabs for
+                this space. On by default for git repositories; off for
+                manual workspaces, which have no working tree for a
+                dispatched agent to work in.
+              </div>
+            </div>
+            <div className="mk-segmented" role="group" aria-label="Agent Mode">
+              {ON_OFF_OPTIONS.map(opt => (
+                <button
+                  key={String(opt.id)}
+                  className={`mk-segmented-btn ${board?.showAgentSurfaces === opt.id ? 'is-active' : ''}`}
+                  aria-pressed={board?.showAgentSurfaces === opt.id}
+                  disabled={savingSurface === 'showAgentSurfaces'}
+                  onClick={() => toggleSurface('showAgentSurfaces', opt.id)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="mk-settings-row">
+            <div className="mk-settings-row-text">
+              <div className="mk-settings-label">Show Kanban Board</div>
+              <div className="mk-settings-hint">
+                Shows the Kanban tab for this space. On by default for
+                manual workspaces, where it is the primary board; off for
+                git repositories, which lead with the Agentic Pipeline.
+              </div>
+            </div>
+            <div className="mk-segmented" role="group" aria-label="Show Kanban Board">
+              {ON_OFF_OPTIONS.map(opt => (
+                <button
+                  key={String(opt.id)}
+                  className={`mk-segmented-btn ${board?.showKanban === opt.id ? 'is-active' : ''}`}
+                  aria-pressed={board?.showKanban === opt.id}
+                  disabled={savingSurface === 'showKanban'}
+                  onClick={() => toggleSurface('showKanban', opt.id)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
           <section className="mk-settings-row">
             <div className="mk-settings-row-text">
               <div className="mk-settings-label">
-                Default epic ({repoPrefix})
+                Default epic
               </div>
               <div className="mk-settings-hint">
                 BACI-235: when set, issues created without an explicit
