@@ -489,6 +489,20 @@ CREATE TABLE IF NOT EXISTS repo_settings (
     -- against the top (lowest-priority) to_be_shipped card. 0 = manual
     -- SHIP only. Per-repo because the Shipping queue is per-repo.
     auto_ship          INTEGER NOT NULL DEFAULT 0 CHECK (auto_ship IN (0,1)),
+    -- Per-space nav-surface gates. show_agent_surfaces gates the
+    -- Agentic Pipeline / Agents / Monitor tabs as a group (UI label
+    -- "Agent Mode"); show_kanban gates the Kanban tab.
+    --
+    -- NULLABLE with no DEFAULT on purpose, twice over: rows in this
+    -- table are created lazily by whichever setting is written first,
+    -- so a DEFAULT never applies to the many repos that have no row at
+    -- all; and the intended default depends on repos.kind (agents on +
+    -- kanban off for a git repo, the reverse for a manual workspace),
+    -- which this table cannot see. NULL means "never set" and
+    -- model.ResolveRepoSurfaces picks the kind-dependent default. Never
+    -- read these columns without going through it.
+    show_agent_surfaces INTEGER CHECK (show_agent_surfaces IN (0,1)),
+    show_kanban         INTEGER CHECK (show_kanban IN (0,1)),
     updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
