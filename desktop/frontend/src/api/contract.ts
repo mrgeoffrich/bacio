@@ -46,6 +46,22 @@ export interface Board {
   // BoardService and the HTTP `model.Repo` both normalise the legacy
   // empty value to "git" before serialising.
   kind: RepoKind;
+  // The per-space nav-surface gates — which top-nav tabs this space
+  // exposes. showAgentSurfaces is the "Agent Mode" setting (the Agentic
+  // Pipeline / Agents / Monitor group); showKanban is "Show Kanban
+  // Board". lib/nav.ts's navFor() / homeView() read exactly these.
+  //
+  // RESOLVED values: a space nobody has configured carries the default
+  // for its kind (agents on + Kanban off for a git repo, the reverse for
+  // a workspace), never `false` meaning "unset". See
+  // model.ResolveRepoSurfaces — nothing in the React tree should
+  // re-derive a default from `kind` itself.
+  //
+  // They ride Board rather than getting their own fetch because
+  // RepoProvider.pickBoard needs the target space's gates synchronously,
+  // inside a click handler, to choose its home view.
+  showAgentSurfaces: boolean;
+  showKanban: boolean;
   issueCount: number;
   // BACI-89 background-sync status. syncEnabled = "this repo has git
   // sync configured"; the other three reflect the controller's

@@ -122,23 +122,41 @@ export interface ApiRepo {
   name: string;
   kind: string;
   path: string;
+  // The per-space nav-surface gates (api.RepoOut). Already RESOLVED
+  // server-side against repos.kind, so `false` genuinely means "hidden"
+  // — never "unset". Optional on the type only so a response from an
+  // older bacio api still decodes; the fallback below re-derives the
+  // kind default rather than reading absence as "hide everything".
+  show_agent_surfaces?: boolean;
+  show_kanban?: boolean;
 }
 
-// boardWithSync folds a SyncStatusApi (possibly undefined) into a
-// Board. Centralised so listBoards, addRepository and addWorkspace stay in
-// lockstep. `kind` is the raw wire string; the narrowing to the RepoKind
-// union happens here so no caller has to remember it.
+// boardWithSync folds a repo row and its (possibly undefined)
+// SyncStatusApi into a Board. Centralised so listBoards, addRepository
+// and addWorkspace stay in lockstep. `kind` is the raw wire string; the
+// narrowing to the RepoKind union happens here so no caller has to
+// remember it.
+//
+// Takes the ApiRepo object rather than its fields positionally: with the
+// two surface gates the positional form would be seven arguments, four
+// of them adjacent booleans and strings, which is a swap waiting to
+// happen.
 export function boardWithSync(
-  prefix: string,
-  name: string,
-  kind: string,
+  repo: ApiRepo,
   issueCount: number,
   sync: SyncStatusApi | undefined,
 ): Board {
+  const kind = normalizeRepoKind(repo.kind);
+  const isWorkspace = kind === 'workspace';
   return {
-    prefix,
-    name,
-    kind: normalizeRepoKind(kind),
+    prefix: repo.prefix,
+    name: repo.name,
+    kind,
+    // Mirrors model.ResolveRepoSurfaces' kind defaults for the
+    // older-server case: a git repo shows the agent surfaces and hides
+    // the Kanban, a workspace does the reverse.
+    showAgentSurfaces: repo.show_agent_surfaces ?? !isWorkspace,
+    showKanban: repo.show_kanban ?? isWorkspace,
     issueCount,
     syncEnabled: sync?.configured ?? false,
     syncBackgroundEnabled: sync?.background_enabled ?? false,

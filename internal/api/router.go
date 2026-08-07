@@ -118,6 +118,14 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/mark-done", d.handleIssueMarkDone)
 	mux.HandleFunc("GET /repos/{prefix}/auto-ship", d.handleRepoAutoShipGet)
 	mux.HandleFunc("PUT /repos/{prefix}/auto-ship", d.handleRepoAutoShip)
+	// Per-space nav-surface gates: which top-nav tabs the space exposes
+	// ("Agent Mode" = the Pipeline / Agents / Monitor group, "Show Kanban
+	// Board" = the Kanban tab). PUT only — the resolved values already
+	// ride every repo payload, so a GET twin would be a second source of
+	// truth. Purely client-side chrome, like backlog-collapsed: no CLI
+	// verb, no bacio schema entry.
+	mux.HandleFunc("PUT /repos/{prefix}/show-agent-surfaces", d.handleRepoShowAgentSurfaces)
+	mux.HandleFunc("PUT /repos/{prefix}/show-kanban", d.handleRepoShowKanban)
 	// BACI-288: per-repo Pipeline Backlog-column collapse preference
 	// (tui_settings `pipeline.backlog_collapsed`). Purely client-side
 	// chrome — GET seeds the rail state, PUT persists it (honouring

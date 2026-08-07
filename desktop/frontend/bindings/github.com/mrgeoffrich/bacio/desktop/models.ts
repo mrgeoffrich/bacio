@@ -129,6 +129,22 @@ export class Board {
      * field is never blank on the wire.
      */
     "kind": string;
+
+    /**
+     * The per-space nav-surface gates — which top-nav tabs this space
+     * exposes. ShowAgentSurfaces is the "Agent Mode" setting (the
+     * Agentic Pipeline / Agents / Monitor group); ShowKanban is "Show
+     * Kanban Board". Both are RESOLVED values: a space that has never
+     * been configured gets the default for its kind (agents on + Kanban
+     * off for a git repo, the reverse for a workspace), never the Go
+     * zero value. See model.ResolveRepoSurfaces.
+     * 
+     * They ride the Board rather than getting their own call because
+     * RepoProvider.pickBoard needs the target space's gates
+     * synchronously, inside a click handler, to pick its home view.
+     */
+    "showAgentSurfaces": boolean;
+    "showKanban": boolean;
     "issueCount": number;
     "syncEnabled": boolean;
     "syncBackgroundEnabled": boolean;
@@ -147,6 +163,12 @@ export class Board {
         }
         if (!("kind" in $$source)) {
             this["kind"] = "";
+        }
+        if (!("showAgentSurfaces" in $$source)) {
+            this["showAgentSurfaces"] = false;
+        }
+        if (!("showKanban" in $$source)) {
+            this["showKanban"] = false;
         }
         if (!("issueCount" in $$source)) {
             this["issueCount"] = 0;

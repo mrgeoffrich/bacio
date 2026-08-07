@@ -58,8 +58,8 @@ export default function FeatureEmojiPicker({ value, onSelect, disabled }: Featur
         <button
           type="button"
           className="mk-features-emoji-btn"
-          aria-label={value ? `Feature emoji: ${value}. Click to change.` : 'Set feature emoji'}
-          title={value ? 'Click to change the feature emoji' : 'Click to set a feature emoji'}
+          aria-label={value ? `Epic emoji: ${value}. Click to change.` : 'Set epic emoji'}
+          title={value ? 'Click to change the epic emoji' : 'Click to set an epic emoji'}
           disabled={disabled}
         >
           {value || <span className="mk-features-emoji-placeholder">＋</span>}
@@ -105,7 +105,7 @@ export default function FeatureEmojiPicker({ value, onSelect, disabled }: Featur
               type="button"
               className="mk-features-emoji-clear"
               onClick={() => commit('')}
-              title="Clear the feature emoji"
+              title="Clear the epic emoji"
             >
               Clear
             </button>

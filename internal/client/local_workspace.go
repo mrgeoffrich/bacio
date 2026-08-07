@@ -14,8 +14,9 @@ import (
 // kind='workspace' and an empty path and remote_url.
 //
 // The store does the real work in one call (validate → allocate prefix →
-// insert → BootstrapRepoDefaults, which seeds both the mandatory
-// catch-all features and the starter Kanban board). This method's job is
+// insert → BootstrapRepoDefaults, which for a workspace seeds the starter
+// Kanban board and nothing else — the catch-all epics are a git-repo
+// Pipeline concern). This method's job is
 // the client-layer contract every other mutation here honours:
 // rehearse the validators, project the dry-run row, and write the audit
 // entry on the commit path.

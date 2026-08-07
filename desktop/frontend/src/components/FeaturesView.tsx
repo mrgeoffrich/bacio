@@ -75,14 +75,14 @@ export default function FeaturesView() {
     api
       .listFeatures(activeBoard)
       .then(setFeatures)
-      .catch((err) => reportError(err, { headline: "Couldn't load features" }));
+      .catch((err) => reportError(err, { headline: "Couldn't load epics" }));
   }, [activeBoard, repoSelected, setDetail]);
 
   if (!repoSelected) {
     return (
       <div className="mk-features">
         <div className="mk-features-empty">
-          Select a repository to view its features.
+          Select a repository to view its epics.
         </div>
       </div>
     );
@@ -94,7 +94,7 @@ export default function FeaturesView() {
         <div
           className="mk-features-filter"
           role="tablist"
-          aria-label="Filter features by state"
+          aria-label="Filter epics by state"
         >
           {FILTERS.map((f) => (
             <button
@@ -120,7 +120,7 @@ export default function FeaturesView() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Filter by title or slug"
-            aria-label="Filter features"
+            aria-label="Filter epics"
           />
           {search && (
             <button
@@ -137,11 +137,11 @@ export default function FeaturesView() {
         <div className="mk-features-list">
           {allFeatures.length === 0 ? (
             <div className="mk-features-list-empty">
-              No features in this repository.
+              No epics in this repository.
             </div>
           ) : visible.length === 0 ? (
             <div className="mk-features-list-empty">
-              No {filter} features.
+              No {filter} epics.
             </div>
           ) : (
             visible.map((f) => (
@@ -159,7 +159,7 @@ export default function FeaturesView() {
       <div className="mk-features-main">
         {!selected ? (
           <div className="mk-features-empty">
-            Pick a feature to see its details.
+            Pick an epic to see its details.
           </div>
         ) : loading ? (
           <div className="mk-features-empty">Loading…</div>

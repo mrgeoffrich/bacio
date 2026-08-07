@@ -16,7 +16,7 @@ const (
 	CatchAllFeatureBugs        = "bugs"
 )
 
-// BootstrapRepoDefaults makes a repo "feature-mandatory ready". If the
+// BootstrapRepoDefaults makes a GIT repo "feature-mandatory ready". If the
 // repo has no default feature yet, it creates the two catch-all features
 // (maintenance + bugs, auto-close off), points the repo default at
 // maintenance, and backfills any feature-less issue onto that default so
@@ -30,10 +30,25 @@ const (
 // never force the catch-alls onto a repo that has opted into its own
 // feature workflow.
 //
-// The Kanban seed runs BEFORE the default-feature early-return on purpose.
-// The two are independent axes: a repo that already carries a deliberate
-// default feature has never been given a Kanban board, and gating the seed
-// behind that return would leave every pre-existing repo boardless forever.
+// A manual workspace gets the Kanban seed and nothing else. "Features are
+// mandatory" is a Pipeline rule, and the Pipeline is a git-repo surface
+// (ResolveRepoSurfaces hides the agent tabs on a workspace by default), so
+// seeding a pathless workspace with Maintenance + Bugs only lands two epics
+// nobody asked for on its Epics tab. A featureless issue is legal
+// everywhere — ResolveCreateIssueFeatureID returns a nil feature id when the
+// repo carries no default — so leaving the default NULL is a supported
+// state, not a hole. Epics can still be created on demand
+// (`bacio feature add`, the TUI Features tab).
+//
+// Workspaces created BEFORE this rule keep their catch-alls: they already
+// carry a default feature and take the early-return above, so nothing
+// retroactively deletes them.
+//
+// The Kanban seed runs BEFORE both early-returns on purpose. The axes are
+// independent: a repo that already carries a deliberate default feature has
+// never been given a Kanban board, and gating the seed behind that return
+// would leave every pre-existing repo boardless forever. A workspace needs
+// the board most of all — it is the workspace's home surface.
 // BootstrapKanbanColumns carries its own count-guard, so the unconditional
 // call stays a single cheap read once the board exists.
 func (s *Store) BootstrapRepoDefaults(repoID int64) error {
@@ -45,6 +60,15 @@ func (s *Store) BootstrapRepoDefaults(repoID int64) error {
 		return err
 	}
 	if settings.DefaultFeatureID != nil {
+		return nil
+	}
+	// The kind read sits after the default-feature early-return so the
+	// already-bootstrapped case (every repeat call) still costs one query.
+	repo, err := s.GetRepoByID(repoID)
+	if err != nil {
+		return err
+	}
+	if repo.IsWorkspace() {
 		return nil
 	}
 	maint, err := s.ensureCatchAllFeature(repoID, CatchAllFeatureMaintenance, "Maintenance")

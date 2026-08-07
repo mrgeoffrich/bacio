@@ -745,6 +745,54 @@ func TestBoardService_LaunchRepo(t *testing.T) {
 	}
 }
 
+// gitSurfaces is a git repo's default nav-surface gates — agent
+// surfaces on, Kanban off. These specs are about the sync fields, so
+// they pass a fixed value rather than exercising the resolver (which
+// has its own coverage in internal/store).
+var gitSurfaces = model.ResolveRepoSurfaces(model.RepoKindGit, nil, nil)
+
+// TestBoardWithSyncCarriesSurfaces pins that the resolved per-space nav
+// gates survive the fold onto Board. Without them the frontend's nav
+// filter sees the Go zero value on every board and hides every tab.
+func TestBoardWithSyncCarriesSurfaces(t *testing.T) {
+	repo := &model.Repo{Prefix: "TEST", Name: "test"}
+
+	bd := boardWithSync(repo, 0, client.SyncStatus{}, gitSurfaces)
+	if !bd.ShowAgentSurfaces || bd.ShowKanban {
+		t.Fatalf("git defaults: got {agent=%v kanban=%v}, want {true false}",
+			bd.ShowAgentSurfaces, bd.ShowKanban)
+	}
+
+	wksp := &model.Repo{Prefix: "WKSP", Name: "wksp", Kind: model.RepoKindWorkspace}
+	bd = boardWithSync(wksp, 0, client.SyncStatus{},
+		model.ResolveRepoSurfaces(model.RepoKindWorkspace, nil, nil))
+	if bd.ShowAgentSurfaces || !bd.ShowKanban {
+		t.Fatalf("workspace defaults: got {agent=%v kanban=%v}, want {false true}",
+			bd.ShowAgentSurfaces, bd.ShowKanban)
+	}
+}
+
+// TestSurfaceFor pins the never-blank-the-nav guarantee: a prefix
+// missing from the bulk map falls back to its kind default, not to the
+// zero value (which would hide every tab).
+func TestSurfaceFor(t *testing.T) {
+	repo := &model.Repo{Prefix: "TEST", Name: "test"}
+
+	// Nil map — the RepoSurfaces call failed.
+	if got := surfaceFor(nil, repo); !got.ShowAgentSurfaces || got.ShowKanban {
+		t.Fatalf("nil map: got %+v, want the git default", got)
+	}
+	// Populated map that simply doesn't carry this prefix.
+	if got := surfaceFor(map[string]model.RepoSurfaces{"OTHR": {}}, repo); !got.ShowAgentSurfaces {
+		t.Fatalf("missing prefix: got %+v, want the git default", got)
+	}
+	// A present entry wins, including an all-off one.
+	got := surfaceFor(map[string]model.RepoSurfaces{"TEST": {}}, repo)
+	if got.ShowAgentSurfaces || got.ShowKanban {
+		t.Fatalf("present entry: got %+v, want both off", got)
+	}
+}
+
 // TestBoardWithSyncCarriesGlobalToggle pins BACI-376: per-repo sync
 // configuration and the app-wide background-sync toggle are two
 // independent bits on the Board, so the topbar badge can tell "this repo
@@ -752,7 +800,7 @@ func TestBoardService_LaunchRepo(t *testing.T) {
 func TestBoardWithSyncCarriesGlobalToggle(t *testing.T) {
 	repo := &model.Repo{Prefix: "TEST", Name: "test"}
 
-	bd := boardWithSync(repo, 3, client.SyncStatus{Configured: true, BackgroundEnabled: false})
+	bd := boardWithSync(repo, 3, client.SyncStatus{Configured: true, BackgroundEnabled: false}, gitSurfaces)
 	if !bd.SyncEnabled {
 		t.Fatal("SyncEnabled = false, want true (repo is configured)")
 	}
@@ -760,7 +808,7 @@ func TestBoardWithSyncCarriesGlobalToggle(t *testing.T) {
 		t.Fatal("SyncBackgroundEnabled = true, want false (global ticker off)")
 	}
 
-	bd = boardWithSync(repo, 3, client.SyncStatus{Configured: false, BackgroundEnabled: true})
+	bd = boardWithSync(repo, 3, client.SyncStatus{Configured: false, BackgroundEnabled: true}, gitSurfaces)
 	if bd.SyncEnabled {
 		t.Fatal("SyncEnabled = true, want false (repo has no sync config)")
 	}
@@ -780,7 +828,7 @@ func TestBoardWithSyncCarriesMirroredBy(t *testing.T) {
 		Configured:        false,
 		MirroredBy:        "team-sync",
 		BackgroundEnabled: true,
-	})
+	}, gitSurfaces)
 	if bd.SyncEnabled {
 		t.Fatal("SyncEnabled = true, want false (no sync remote of its own)")
 	}
@@ -788,7 +836,7 @@ func TestBoardWithSyncCarriesMirroredBy(t *testing.T) {
 		t.Fatalf("SyncMirroredBy = %q, want team-sync", bd.SyncMirroredBy)
 	}
 
-	bd = boardWithSync(repo, 0, client.SyncStatus{BackgroundEnabled: true})
+	bd = boardWithSync(repo, 0, client.SyncStatus{BackgroundEnabled: true}, gitSurfaces)
 	if bd.SyncMirroredBy != "" {
 		t.Fatalf("SyncMirroredBy = %q, want empty (nothing mirrors it)", bd.SyncMirroredBy)
 	}

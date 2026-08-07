@@ -192,7 +192,7 @@ export default function SystemSettingsSection({
             <ScopeChip kind="server" />
           </div>
           <div className="mk-settings-hint">
-            When on, archived issues, documents and features surface in the board, doc list and feature list (rendered visibly muted). When off (the default), they&apos;re hidden. The hourly auto-sweep archives completed work older than the retention window below; you can also archive any item manually.
+            When on, archived issues, documents and epics surface in the board, doc list and epic list (rendered visibly muted). When off (the default), they&apos;re hidden. The hourly auto-sweep archives completed work older than the retention window below; you can also archive any item manually.
           </div>
         </div>
         <div className="mk-segmented" role="group" aria-label="Show archived items">
@@ -277,7 +277,7 @@ export default function SystemSettingsSection({
             <ScopeChip kind="server" />
           </div>
           <div className="mk-settings-hint">
-            When on (the default), the hourly sweep hides done / cancelled issues whose terminal-state timestamp is older than the retention window. You can always unarchive items from the board. The feature + linked-doc cascade still runs when this is off, so manually archiving an issue still tidies up its parents.
+            When on (the default), the hourly sweep hides done / cancelled issues whose terminal-state timestamp is older than the retention window. You can always unarchive items from the board. The epic + linked-doc cascade still runs when this is off, so manually archiving an issue still tidies up its parents.
           </div>
         </div>
         <div className="mk-segmented" role="group" aria-label="Auto-archive completed issues">

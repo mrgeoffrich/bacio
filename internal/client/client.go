@@ -334,6 +334,19 @@ type Client interface {
 	// seed the Shipping switch from the source of truth rather than a
 	// local cache.
 	GetRepoAutoShip(ctx context.Context, repo *model.Repo) (bool, error)
+	// RepoSurfaces resolves every space's nav-surface gates — which
+	// top-nav tabs it exposes — keyed by prefix. Bulk-shaped like
+	// SyncStatuses because the boards list is the only reader and needs
+	// all of them at once to render the nav.
+	//
+	// The two setters are the write side. Purely client-side chrome: no
+	// Go subsystem branches on these, so unlike auto-ship they carry no
+	// CLI verb and no `bacio schema` entry (the backlog-collapsed
+	// precedent). Persisted on repo_settings, which is deliberately
+	// unsynced — these are per-machine.
+	RepoSurfaces(ctx context.Context) (map[string]model.RepoSurfaces, error)
+	SetRepoShowAgentSurfaces(ctx context.Context, repo *model.Repo, enabled, dryRun bool) (bool, error)
+	SetRepoShowKanban(ctx context.Context, repo *model.Repo, enabled, dryRun bool) (bool, error)
 	// GetRepoBacklogCollapsed / SetRepoBacklogCollapsed (BACI-288) front
 	// the per-repo Pipeline-page "collapse the Backlog column to a rail"
 	// display preference, persisted in the `tui_settings` KV (purely

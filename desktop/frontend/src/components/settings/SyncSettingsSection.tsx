@@ -163,7 +163,7 @@ export default function SyncSettingsSection() {
           </div>
           <div className="mk-settings-hint">
             When on, the leader-elected controller mirrors your issues,
-            features, and documents to each configured sync repo every
+            epics, and documents to each configured sync repo every
             few minutes. Turn off to stop the background ticker without
             touching the per-project sync configuration.
             {/* BACI-376: this toggle is app-wide, and so is the mirror

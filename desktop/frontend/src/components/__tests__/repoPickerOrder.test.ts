@@ -10,6 +10,8 @@ function board(prefix: string, kind: RepoKind = 'git'): Board {
     prefix,
     name: prefix.toLowerCase(),
     kind,
+    showAgentSurfaces: kind !== 'workspace',
+    showKanban: kind === 'workspace',
     issueCount: 0,
     syncEnabled: false,
     syncBackgroundEnabled: false,

@@ -190,7 +190,15 @@ local hooks:
   `NotionEditor` are untouched by the decomposition — including the
   **ref-not-state** `initializedRef` guard (BACI-340).
 - `components/features/*`, `components/settings/*` — the same treatment for the
-  Features and Settings screens.
+  Epics and Settings screens. (The directory and the type names stay
+  `feature*`; only the display term and the URL became "Epics".)
+- `lib/nav.ts` — the top-nav data (`NAV`) plus `navFor()` / `homeView()`, which
+  gate the tabs on the active space's `showAgentSurfaces` / `showKanban`. It
+  lives in `lib/`, not in `Topbar.tsx`, because `RepoProvider` and `App` both
+  need `homeView` and the plain-node smoke suites can't import a `.tsx`.
+  `navFor()` is the *single* filter: `Topbar` renders it and `App` indexes it
+  for the digit hotkeys, so filtering in one place only would desync the
+  keyboard from the buttons. See `docs/web-app-mode.md` §7b.
 
 **Hot leaf cards are `React.memo`'d** (`PipelineCard`, `StageCard` via
 `memoCard.ts`'s `cardPropsEqual`) so the 10s poll re-render doesn't cascade

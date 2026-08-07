@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"errors"
+
+	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
 // RepoSettings is the per-repo typed-settings view (BACI-235). Today
@@ -19,6 +21,15 @@ type RepoSettings struct {
 	// toggle. When true the controller auto-ship ticker dispatches a
 	// ship-mode agent against the top to_be_shipped card.
 	AutoShip bool
+	// The two nav-surface gates, RAW — nil means "never written", which
+	// resolves to a default that depends on repos.kind. The `…Set`
+	// suffix is the warning: these are not the effective values, and a
+	// caller that treats nil as false gets the wrong answer for every
+	// space nobody has touched. Read the resolved pair through
+	// GetRepoSurfaces / ListRepoSurfaces instead; this struct exposes
+	// them only because it is the row's faithful shape.
+	ShowAgentSurfacesSet *bool
+	ShowKanbanSet        *bool
 }
 
 // GetRepoSettings reads the per-repo settings row for repoID. Returns
@@ -30,10 +41,12 @@ func (s *Store) GetRepoSettings(repoID int64) (RepoSettings, error) {
 	out := RepoSettings{RepoID: repoID}
 	var defaultFeatureID sql.NullInt64
 	var autoShip int
+	var showAgent, showKanban sql.NullBool
 	err := s.DB.QueryRow(
-		`SELECT default_feature_id, auto_ship FROM repo_settings WHERE repo_id = ?`,
+		`SELECT default_feature_id, auto_ship, show_agent_surfaces, show_kanban
+		   FROM repo_settings WHERE repo_id = ?`,
 		repoID,
-	).Scan(&defaultFeatureID, &autoShip)
+	).Scan(&defaultFeatureID, &autoShip, &showAgent, &showKanban)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
 	}
@@ -45,7 +58,110 @@ func (s *Store) GetRepoSettings(repoID int64) (RepoSettings, error) {
 		out.DefaultFeatureID = &v
 	}
 	out.AutoShip = autoShip != 0
+	out.ShowAgentSurfacesSet = nullableBool(showAgent)
+	out.ShowKanbanSet = nullableBool(showKanban)
 	return out, nil
+}
+
+// nullableBool maps a scanned SQL nullable onto the *bool the resolver
+// takes: nil for NULL ("never written"), a pointer to the value
+// otherwise.
+func nullableBool(v sql.NullBool) *bool {
+	if !v.Valid {
+		return nil
+	}
+	b := v.Bool
+	return &b
+}
+
+// GetRepoSurfaces resolves one space's nav-surface gates against its
+// kind. This — not the raw RepoSettings columns — is the per-repo
+// reader; see model.ResolveRepoSurfaces for why the raw values are
+// never the answer on their own.
+//
+// The LEFT JOIN is what lets a repo with no repo_settings row at all
+// (the common case) still resolve: the columns come back NULL and the
+// kind decides.
+func (s *Store) GetRepoSurfaces(repoID int64) (model.RepoSurfaces, error) {
+	var kind string
+	var showAgent, showKanban sql.NullBool
+	err := s.DB.QueryRow(
+		`SELECT r.kind, rs.show_agent_surfaces, rs.show_kanban
+		   FROM repos r
+		   LEFT JOIN repo_settings rs ON rs.repo_id = r.id
+		  WHERE r.id = ?`,
+		repoID,
+	).Scan(&kind, &showAgent, &showKanban)
+	if err != nil {
+		return model.RepoSurfaces{}, err
+	}
+	return model.ResolveRepoSurfaces(
+		model.RepoKind(kind), nullableBool(showAgent), nullableBool(showKanban),
+	), nil
+}
+
+// ListRepoSurfaces resolves every space's gates in one query, keyed by
+// prefix. Bulk-shaped because the only reader is the boards list, which
+// needs all of them at once to render the nav — the same reason
+// SyncStatuses is bulk-shaped.
+func (s *Store) ListRepoSurfaces() (map[string]model.RepoSurfaces, error) {
+	rows, err := s.DB.Query(
+		`SELECT r.prefix, r.kind, rs.show_agent_surfaces, rs.show_kanban
+		   FROM repos r
+		   LEFT JOIN repo_settings rs ON rs.repo_id = r.id`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]model.RepoSurfaces)
+	for rows.Next() {
+		var prefix, kind string
+		var showAgent, showKanban sql.NullBool
+		if err := rows.Scan(&prefix, &kind, &showAgent, &showKanban); err != nil {
+			return nil, err
+		}
+		out[prefix] = model.ResolveRepoSurfaces(
+			model.RepoKind(kind), nullableBool(showAgent), nullableBool(showKanban),
+		)
+	}
+	return out, rows.Err()
+}
+
+// SetRepoShowAgentSurfaces writes the per-space "Agent Mode" gate.
+// Upsert, same shape as SetRepoAutoShip — note the DO UPDATE names only
+// this column, so writing one setting never clobbers a sibling.
+func (s *Store) SetRepoShowAgentSurfaces(repoID int64, enabled bool) error {
+	_, err := s.DB.Exec(
+		`INSERT INTO repo_settings (repo_id, show_agent_surfaces, updated_at)
+		 VALUES (?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(repo_id) DO UPDATE SET
+		   show_agent_surfaces = excluded.show_agent_surfaces,
+		   updated_at          = CURRENT_TIMESTAMP`,
+		repoID, boolBit(enabled),
+	)
+	return err
+}
+
+// SetRepoShowKanban writes the per-space "Show Kanban Board" gate.
+func (s *Store) SetRepoShowKanban(repoID int64, enabled bool) error {
+	_, err := s.DB.Exec(
+		`INSERT INTO repo_settings (repo_id, show_kanban, updated_at)
+		 VALUES (?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(repo_id) DO UPDATE SET
+		   show_kanban = excluded.show_kanban,
+		   updated_at  = CURRENT_TIMESTAMP`,
+		repoID, boolBit(enabled),
+	)
+	return err
+}
+
+// boolBit maps a Go bool onto the 0/1 integer SQLite stores.
+func boolBit(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // SetRepoAutoShip writes the per-repo Shipping-column auto-ship toggle.

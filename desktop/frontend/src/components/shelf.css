@@ -1,0 +1,91 @@
+/* Shelf — the right-docked, full-height overlay panel (components/Shelf.tsx).
+ *
+ * This is the generic frame only. Anything specific to what a particular
+ * shelf *contains* belongs with that component's own rules — the repo
+ * picker's row / search / section styling stays in styles/desktop.css
+ * beside the other 85 lines of .mk-repo-picker-*.
+ *
+ * It lives here rather than in styles/app.css or styles/desktop.css for
+ * the same reason components/workspace/workspace.css does: a new
+ * component family, imported from the module that uses it, which also
+ * puts these rules after the global sheets in the bundle so
+ * equal-specificity ties resolve in this file's favour.
+ *
+ * Geometry is lifted from app.css's (currently unused) .mk-drawer block
+ * so the two agree if that one is ever revived — same edge, same width
+ * clamp, same z-index pair. The entrance differs deliberately: .mk-drawer
+ * nudges 20px, this slides the full panel width in from the edge, which
+ * is what reads as a shelf rather than a fade.
+ *
+ * z-index ladder: topbar 5 → anchored popovers 20 → shelf scrim 50 →
+ * shelf 60 → Modal 100/101 → error modal 200/201. A Modal opened from
+ * inside a shelf therefore stacks above it, which is the intent.
+ *
+ * Every value is an existing design token — no new colours.
+ */
+
+.mk-shelf-scrim {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 50;
+}
+
+.mk-shelf {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  z-index: 60;
+  width: min(420px, 92vw);
+  display: flex; flex-direction: column;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border-1);
+  box-shadow: var(--shadow-4);
+}
+
+/* Radix stamps data-state on both parts, so the enter/exit pair is CSS
+   only — no AnimatePresence, and nothing for a caller to remember. */
+.mk-shelf-scrim[data-state='open'] { animation: mk-shelf-fade var(--dur-medium) var(--ease-out); }
+.mk-shelf-scrim[data-state='closed'] { animation: mk-shelf-fade var(--dur-fast) var(--ease-out) reverse; }
+.mk-shelf[data-state='open'] { animation: mk-shelf-in var(--dur-medium) var(--ease-out); }
+.mk-shelf[data-state='closed'] { animation: mk-shelf-in var(--dur-fast) var(--ease-out) reverse; }
+
+@keyframes mk-shelf-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mk-shelf-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+/* Respect a reduced-motion preference: the panel still appears, it just
+   doesn't travel. */
+@media (prefers-reduced-motion: reduce) {
+  .mk-shelf[data-state='open'],
+  .mk-shelf[data-state='closed'] { animation: none; }
+}
+
+.mk-shelf-head {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 12px 14px 18px;
+  border-bottom: 1px solid var(--border-1);
+}
+
+.mk-shelf-title {
+  margin: 0; flex: 1; min-width: 0;
+  font-family: var(--font-sans); font-size: 14px; font-weight: 700;
+  color: var(--fg-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.mk-shelf-close { flex-shrink: 0; }
+
+/* The scrolling region. min-height:0 is load-bearing — without it a flex
+   child refuses to shrink below its content and the panel scrolls as a
+   whole instead of the list scrolling inside a pinned head/foot. */
+.mk-shelf-body {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+
+.mk-shelf-foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-1);
+}

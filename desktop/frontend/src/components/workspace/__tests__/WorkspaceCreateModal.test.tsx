@@ -27,6 +27,8 @@ function board(prefix: string, name: string): Board {
     prefix,
     name,
     kind: 'workspace',
+    showAgentSurfaces: false,
+    showKanban: true,
     issueCount: 0,
     syncEnabled: false,
     syncBackgroundEnabled: false,

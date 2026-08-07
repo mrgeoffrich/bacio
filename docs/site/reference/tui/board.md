@@ -70,7 +70,7 @@ A modal that lets you toggle which state columns are visible. Useful for hiding 
 
 Hidden columns persist per-repo (in `tui_settings(repo_id, key, value)`), so the next time you open the TUI you're back where you left off.
 
-## The feature picker (`f`)
+## The epic picker (`f`)
 
 A modal that lets you filter the board by feature. Each row shows a feature name and its issue count; toggling hides that feature's issues from the board.
 

@@ -14,35 +14,28 @@
 // model and the SPA-fallback contract on both the `bacio web` asset
 // server and the Wails AssetFileServerFS.
 
-import type { RepoKind } from '../api';
+// NAV view ids — kept in lockstep with Topbar.tsx's NAV array. Three
+// view ids are special-cased in viewPath below: their URL matches the
+// tab label rather than the internal name (`board` → `/issues`,
+// `docs` → `/documents`, `features` → `/epics`). The ids themselves are
+// internal and deliberately unchanged by the Features → Epics rename —
+// they are load-bearing across App's routes, RepoProvider's legacy page
+// words, the `mk-features-*` CSS and every component filename.
+export type NavView = 'pipeline' | 'board' | 'features' | 'docs' | 'agents' | 'history' | 'monitor';
 
-// NAV view ids — kept in lockstep with Topbar.tsx's NAV array. The
-// `board` view is special-cased: the path is `/issues` (matches the
-// "Issues" tab label) rather than `/board`.
-type NavView = 'pipeline' | 'board' | 'features' | 'docs' | 'agents' | 'history' | 'monitor';
-
-// homeView is the nav view a repo lands on when nothing more specific is
-// asked for — a bare `/`, a repo switch off a page that doesn't exist in the
-// new repo, closing an issue with an empty back stack, or the `/:prefix/*`
-// catch-all.
-//
-// A workspace has no working tree, so a dispatched agent would have nowhere
-// to work and the Agentic Pipeline nav entry is hidden for it (locked
-// decision D1). Landing a workspace on `pipeline` would therefore strand the
-// user on a page with no nav segment highlighted and no way back — so the
-// Kanban is home there instead. `kind` is compared against the string literal
-// rather than a Wails enum member: RepoKind is a string-literal union in the
-// contract precisely so this comparison survives the web build.
-export function homeView(kind?: RepoKind): NavView {
-  return kind === 'workspace' ? 'board' : 'pipeline';
-}
+// homeView lives in ./nav — it is defined in terms of which nav entries
+// a space actually exposes, so it belongs beside the nav data rather
+// than beside the path shapes.
 
 // viewPath maps a top-nav view id onto its base route under the active
-// repo prefix. Two view ids have URL aliases that match the top-nav
+// repo prefix. Three view ids have URL aliases that match the top-nav
 // labels rather than the internal name: `board` → `/<prefix>/issues`
-// ("Issues" tab) and `docs` → `/<prefix>/documents` ("Documents" tab).
-// Keeps documentPath / featurePath / issuePath all in plural-noun shape
-// too. BACI-337: the `monitor` nav lands on the Transcripts sub-tab —
+// ("Issues" tab), `docs` → `/<prefix>/documents` ("Documents" tab) and
+// `features` → `/<prefix>/epics` ("Epics" tab). Keeps documentPath /
+// featurePath / issuePath all in plural-noun shape too. The `features`
+// alias is the whole mechanism behind the Epics URL rename: the view id
+// stays `features` everywhere internally and only the emitted path
+// changes. BACI-337: the `monitor` nav lands on the Transcripts sub-tab —
 // the primary destination — rather than the bare `/<prefix>/monitor`
 // Network sub-tab. The Network sub-tab is still reachable by deep-link /
 // in-page tab click; viewFromPath maps both back to the `monitor` view
@@ -50,6 +43,7 @@ export function homeView(kind?: RepoKind): NavView {
 export function viewPath(prefix: string, view: NavView | string): string {
   if (view === 'board') return `/${prefix}/issues`;
   if (view === 'docs') return `/${prefix}/documents`;
+  if (view === 'features') return `/${prefix}/epics`;
   if (view === 'monitor') return monitorTranscriptsPath(prefix);
   return `/${prefix}/${view}`;
 }
@@ -94,9 +88,11 @@ export function transcriptPath(prefix: string, dispatchId: number | string): str
 }
 
 // featurePath maps a feature slug onto its detail route under the
-// active repo prefix.
+// active repo prefix. The URL segment is `epics` (the tab label); the
+// slug itself is unchanged — it is the canonical per-repo feature key
+// on the wire, in the CLI and in the sync layout.
 export function featurePath(prefix: string, slug: string): string {
-  return `/${prefix}/features/${slug}`;
+  return `/${prefix}/epics/${slug}`;
 }
 
 // documentPath maps a doc filename onto its detail route under the
@@ -117,14 +113,21 @@ export function prefixFromPath(pathname: string): string {
 
 // viewFromPath inverts viewPath for the Topbar's active-segment
 // derivation: skip the first (prefix) segment, read the next one as the
-// view, map `issues` back to the `board` view id and `documents` back
-// to the `docs` view id. Returns the empty string when the path doesn't
-// match a known nav view so the segmented control simply shows nothing
-// active (e.g. on an overlay screen or a bare prefix root).
+// view, then map the three URL aliases back to their view ids (`issues`
+// → `board`, `documents` → `docs`, `epics` → `features`). Returns the
+// empty string when the path doesn't match a known nav view so the
+// segmented control simply shows nothing active (e.g. on an overlay
+// screen or a bare prefix root).
+//
+// A legacy `/<prefix>/features` path falls through the default branch
+// and returns `features` as itself, so the frame rendered before App's
+// LegacyFeaturesRedirect fires still highlights the Epics segment
+// rather than flashing an unhighlighted nav.
 export function viewFromPath(pathname: string): string {
   const segs = pathname.replace(/^\/+/, '').split('/');
   const view = segs[1] ?? '';
   if (view === 'issues') return 'board';
   if (view === 'documents') return 'docs';
+  if (view === 'epics') return 'features';
   return view;
 }

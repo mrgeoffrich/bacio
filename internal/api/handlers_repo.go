@@ -15,6 +15,51 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
+// RepoOut is model.Repo plus that space's resolved nav-surface gates —
+// which top-nav tabs it exposes. The embedded pointer means every
+// existing repo field marshals exactly as before, so this is purely
+// additive on the wire (remote.go decodes with plain json.Unmarshal,
+// and an older client simply ignores the two extra keys).
+//
+// The gates ride the repo payload rather than getting their own GET
+// because the only reader is the frontend's board list, and it needs
+// them synchronously: RepoProvider.pickBoard computes the target
+// space's home view inside a click handler, before navigating. A
+// separate fetch would turn that into an await mid-click.
+//
+// The values are RESOLVED — never the raw nullable columns. See
+// model.ResolveRepoSurfaces.
+type RepoOut struct {
+	*model.Repo
+	ShowAgentSurfaces bool `json:"show_agent_surfaces"`
+	ShowKanban        bool `json:"show_kanban"`
+}
+
+// repoOut builds one RepoOut from a repo and the resolved-surfaces map.
+// One builder so every repo-shaped response carries the gates and none
+// can drift; a prefix missing from the map falls back to the kind
+// default rather than to the Go zero value, which would blank the nav.
+func repoOut(repo *model.Repo, surfaces map[string]model.RepoSurfaces) RepoOut {
+	s, ok := surfaces[repo.Prefix]
+	if !ok {
+		s = model.ResolveRepoSurfaces(repo.Kind, nil, nil)
+	}
+	return RepoOut{Repo: repo, ShowAgentSurfaces: s.ShowAgentSurfaces, ShowKanban: s.ShowKanban}
+}
+
+// repoOutOne is the single-repo form, for handlers that don't already
+// hold the bulk map.
+func (d deps) repoOutOne(repo *model.Repo) RepoOut {
+	s, err := d.store.GetRepoSurfaces(repo.ID)
+	if err != nil {
+		// A surfaces read failing shouldn't fail the whole repo
+		// response; fall back to the kind default, same as a missing
+		// map entry above.
+		s = model.ResolveRepoSurfaces(repo.Kind, nil, nil)
+	}
+	return RepoOut{Repo: repo, ShowAgentSurfaces: s.ShowAgentSurfaces, ShowKanban: s.ShowKanban}
+}
+
 func (d deps) handleReposList(w http.ResponseWriter, r *http.Request) {
 	repos, err := d.store.ListRepos()
 	if err != nil {
@@ -22,10 +67,17 @@ func (d deps) handleReposList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	if repos == nil {
-		repos = []*model.Repo{}
+	surfaces, err := d.store.ListRepoSurfaces()
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
 	}
-	writeJSON(w, http.StatusOK, repos)
+	out := make([]RepoOut, 0, len(repos))
+	for _, repo := range repos {
+		out = append(out, repoOut(repo, surfaces))
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // RepoActivityOut is one row of `GET /repos/activity` (BACI-369) — the
@@ -68,7 +120,7 @@ func (d deps) handleReposShow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, repo)
+	writeJSON(w, http.StatusOK, d.repoOutOne(repo))
 }
 
 func (d deps) handleReposCreate(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +261,92 @@ func (d deps) handleReposCreate(w http.ResponseWriter, r *http.Request) {
 	if err := d.store.BootstrapRepoDefaults(repo.ID); err != nil {
 		d.logger.Warn("bacio: bootstrap repo defaults", "repo", repo.Prefix, "err", err)
 	}
-	writeJSON(w, http.StatusCreated, repo)
+	writeJSON(w, http.StatusCreated, d.repoOutOne(repo))
+}
+
+// surfaceToggleIn is the strict-decoded body for the two per-space
+// nav-surface gates. A local request struct, not a bacio
+// schema-registered inputs.* type: there is no CLI verb for either,
+// because nothing in Go reads them — they gate React buttons and one
+// route redirect. Same class as backlogCollapsedIn and
+// boardHiddenStatesIn; contrast auto_ship, which earns the full
+// six-rule CLI treatment because the controller's ticker acts on it.
+type surfaceToggleIn struct {
+	Enabled bool `json:"enabled"`
+}
+
+// handleRepoShowAgentSurfaces — PUT /repos/{prefix}/show-agent-surfaces.
+// Persists the per-space "Agent Mode" gate (the Agentic Pipeline /
+// Agents / Monitor tabs). Honours ?dry_run=true and audits a
+// repo_setting.update row only when the value actually changes.
+//
+// There is no GET twin: GET /repos and GET /repos/{prefix} already
+// carry the resolved value on every repo payload.
+func (d deps) handleRepoShowAgentSurfaces(w http.ResponseWriter, r *http.Request) {
+	d.handleSurfaceToggle(w, r, "show_agent_surfaces")
+}
+
+// handleRepoShowKanban — PUT /repos/{prefix}/show-kanban. Persists the
+// per-space "Show Kanban Board" gate.
+func (d deps) handleRepoShowKanban(w http.ResponseWriter, r *http.Request) {
+	d.handleSurfaceToggle(w, r, "show_kanban")
+}
+
+// handleSurfaceToggle is the shared body of the two gate handlers —
+// they differ only in which column they write and which resolved field
+// they compare against for the change check.
+func (d deps) handleSurfaceToggle(w http.ResponseWriter, r *http.Request, field string) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[surfaceToggleIn](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, map[string]any{field: in.Enabled})
+		return
+	}
+	// Compare against the RESOLVED previous value, not the raw column:
+	// on a space that has never been touched the column is NULL, and
+	// writing the kind default explicitly is not a change worth an
+	// audit row.
+	prev, err := d.store.GetRepoSurfaces(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	var was bool
+	if field == "show_kanban" {
+		was = prev.ShowKanban
+		err = d.store.SetRepoShowKanban(repo.ID, in.Enabled)
+	} else {
+		was = prev.ShowAgentSurfaces
+		err = d.store.SetRepoShowAgentSurfaces(repo.ID, in.Enabled)
+	}
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if was != in.Enabled {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Actor:       ActorFromContext(r.Context()),
+			Op:          "repo_setting.update",
+			Kind:        "repo_setting",
+			TargetLabel: field,
+			Details:     fmt.Sprintf("enabled=%v", in.Enabled),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{field: in.Enabled})
 }
 
 // handleReposDelete implements `DELETE /repos/{prefix}` — the

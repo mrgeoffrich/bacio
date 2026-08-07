@@ -1036,6 +1036,26 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add auto_ship to repo_settings: %w", err)
 		}
 	}
+	// repo_settings.show_agent_surfaces / show_kanban — the per-space
+	// nav-surface gates. Deliberately NULLABLE with no DEFAULT: NULL means
+	// "never set", which model.ResolveRepoSurfaces resolves against
+	// repos.kind. See the schema.sql comment for why a DEFAULT can't
+	// express either of these. The CHECK lives in schema.sql only —
+	// SQLite's ADD COLUMN can't carry one — same as auto_ship above.
+	for _, col := range []struct{ name, ddl string }{
+		{"show_agent_surfaces", `ALTER TABLE repo_settings ADD COLUMN show_agent_surfaces INTEGER`},
+		{"show_kanban", `ALTER TABLE repo_settings ADD COLUMN show_kanban INTEGER`},
+	} {
+		has, err := columnExists(db, "repo_settings", col.name)
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.Exec(col.ddl); err != nil {
+				return fmt.Errorf("add %s to repo_settings: %w", col.name, err)
+			}
+		}
+	}
 	// BACI-305: classification + correlation columns on proxy_requests so
 	// BACI-306's per-job message parser can select exactly the Anthropic
 	// message captures and attribute them to a dispatch. content_type /

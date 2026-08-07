@@ -76,28 +76,28 @@ Cycles through three inner panes — description, comments, attachments — via 
 | `n` | Minimal — keep only the first state column visible (matches the in-app footer's `n minimal`). |
 | `esc` | Close the picker. |
 
-### Feature picker (open with `f`)
+### Epic picker (open with `f`)
 
 | Key | Action |
 |---|---|
 | `j` / `k` | Move selection. |
 | `space` | Toggle the focused feature. |
-| `a` | Show all features. |
-| `n` | Isolate — hide every feature except the focused one. |
+| `a` | Show all epics. |
+| `n` | Isolate — hide every epic except the focused one. |
 | `esc` | Close the picker. |
 
-## Features tab
+## Epics tab
 
 | Key | Action |
 |---|---|
-| `j` / `k` (or `down` / `up`) | Move between features. |
-| `g` / `home` | First feature. |
-| `G` / `end` | Last feature. |
-| `enter` | Open the focused feature's overlay. |
+| `j` / `k` (or `down` / `up`) | Move between epics. |
+| `g` / `home` | First epic. |
+| `G` / `end` | Last epic. |
+| `enter` | Open the focused epic's overlay. |
 | `r` | Reload. |
 | `q` | Quit. |
 
-### Feature overlay
+### Epic overlay
 
 | Key | Action |
 |---|---|

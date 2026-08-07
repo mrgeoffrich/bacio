@@ -39,9 +39,14 @@ type LinkedDocPanelProps = {
 
 export default function LinkedDocPanel({ doc, activeBoard }: LinkedDocPanelProps) {
   const via = doc.linkedVia || [];
+  // `feature/<slug>` is the link-origin token as it arrives on the wire
+  // (and as the CLI spells it), so both the startsWith match and the
+  // interpolated `(via …)` form keep the `feature/` prefix verbatim —
+  // renaming the rendered token would misreport the link's identity.
+  // Only the standalone prose label follows the Epics rename.
   const featureVia = via.find((v) => v.startsWith('feature/'));
   const viaLabel = via.includes('issue')
-    ? (featureVia ? '(issue + feature)' : '')
+    ? (featureVia ? '(issue + epic)' : '')
     : (featureVia ? `(via ${featureVia})` : '');
 
   return (

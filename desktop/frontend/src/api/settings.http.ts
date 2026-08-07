@@ -216,6 +216,40 @@ export async function setBoardHiddenStates(
   return { states: res.states ?? [] };
 }
 
+// setShowAgentSurfaces / setShowKanban persist the per-space nav-surface
+// gates — which top-nav tabs the space exposes. PUT only; the resolved
+// values already ride every repo row from GET /repos, so there is no
+// getter pair to drift from it. Mirrors the Wails seam in settings.ts —
+// there is no `satisfies` parity check between the two transports, so
+// `npm run build:web` is what catches a drift here.
+export async function setShowAgentSurfaces(
+  repoPrefix: string,
+  enabled: boolean,
+): Promise<boolean> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit its nav settings');
+  }
+  const res = await call<{ show_agent_surfaces: boolean }>(
+    `/repos/${encodeURIComponent(repoPrefix)}/show-agent-surfaces`,
+    { method: 'PUT', body: { enabled } },
+  );
+  return res.show_agent_surfaces;
+}
+
+export async function setShowKanban(
+  repoPrefix: string,
+  enabled: boolean,
+): Promise<boolean> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit its nav settings');
+  }
+  const res = await call<{ show_kanban: boolean }>(
+    `/repos/${encodeURIComponent(repoPrefix)}/show-kanban`,
+    { method: 'PUT', body: { enabled } },
+  );
+  return res.show_kanban;
+}
+
 // The bacio api server runs the elector itself, sharing the ui_leader
 // table with the desktop and TUI. The browser can never be the leader,
 // but its connected api server can — so the "Controlling" chip reflects
