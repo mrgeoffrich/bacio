@@ -601,7 +601,7 @@ func (b *boardView) Breadcrumb() string {
 	case b.picker:
 		return "Columns"
 	case b.featurePicker:
-		return "Features"
+		return "Epics"
 	}
 	return ""
 }
@@ -638,7 +638,7 @@ func (b *boardView) Help() string {
 	if b.confirmArchive && b.selected != nil && b.selected.ID == b.confirmArchiveID {
 		return fmt.Sprintf("archive %s (%s)? y to confirm · n to cancel", b.selected.Key, b.selected.State)
 	}
-	return "h/l cols · j/k cards · enter open · N new · x send · X cancel · a archive · A unarchive · ? answer · c columns · f features · H hide col · d detail · r reload · q quit"
+	return "h/l cols · j/k cards · enter open · N new · x send · X cancel · a archive · A unarchive · ? answer · c columns · f epics · H hide col · d detail · r reload · q quit"
 }
 
 func (b *boardView) Update(msg tea.Msg) tea.Cmd {
@@ -1582,7 +1582,7 @@ func (b *boardView) renderDetail(width, height int) string {
 
 	metaParts := []string{"state: " + stateLabel(iss.State)}
 	if iss.FeatureSlug != "" {
-		metaParts = append(metaParts, "feature: ["+iss.FeatureSlug+"]")
+		metaParts = append(metaParts, "epic: ["+iss.FeatureSlug+"]")
 	}
 	if len(iss.Tags) > 0 {
 		metaParts = append(metaParts, "tags: "+strings.Join(iss.Tags, ", "))

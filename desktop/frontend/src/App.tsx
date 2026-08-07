@@ -44,6 +44,19 @@ function isEditingTarget(el: EventTarget | null) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 }
 
+// The Epics tab moved from `/<prefix>/features` to `/<prefix>/epics`.
+// Links and bookmarks shared before the rename keep working: this rewrites
+// the page segment in place and hands the router a canonical /epics URL,
+// preserving the slug, query and hash. Mounted on the two legacy paths
+// below. RepoProvider's LEGACY_PAGE_WORDS still carries 'features' too, so
+// a prefix-less `/features` is rebased under the fallback prefix first and
+// then lands here.
+function LegacyFeaturesRedirect() {
+  const { pathname, search, hash } = useLocation();
+  const to = pathname.replace(/^\/([^/]+)\/features(?=\/|$)/, '/$1/epics');
+  return <Navigate to={to + search + hash} replace />;
+}
+
 // Shell sits inside every provider, so it reads global data from the context
 // hooks and owns only the ephemeral overlay flags (palette / settings /
 // composer), the global keyboard shortcuts, and the page routing.
@@ -269,21 +282,26 @@ function Shell() {
               }
             />
             <Route
-              path="/:prefix/features"
+              path="/:prefix/epics"
               element={
-                <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">
+                <ErrorBoundary headline="Something went wrong in Epics" label="The Epics view crashed">
                   <FeaturesView />
                 </ErrorBoundary>
               }
             />
             <Route
-              path="/:prefix/features/:slug"
+              path="/:prefix/epics/:slug"
               element={
-                <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">
+                <ErrorBoundary headline="Something went wrong in Epics" label="The Epics view crashed">
                   <FeaturesView />
                 </ErrorBoundary>
               }
             />
+            {/* Pre-rename links to the Epics tab. Declared as two explicit
+                routes (rather than a splat) to match the shape of the pair
+                they replace. */}
+            <Route path="/:prefix/features" element={<LegacyFeaturesRedirect />} />
+            <Route path="/:prefix/features/:slug" element={<LegacyFeaturesRedirect />} />
             <Route
               path="/:prefix/documents"
               element={

@@ -161,14 +161,14 @@ export default function IssueComposer({ open, onClose, onCreated }: IssueCompose
             empty slug, which the store resolves to the repo default at
             the boundary — so a repo with no features still creates. */}
         <label className="mk-settings-row">
-          <span className="mk-settings-label">Feature</span>
+          <span className="mk-settings-label">Epic</span>
           <select
             className="mk-tmpl-input"
             value={featureSlug}
             onChange={(e) => setFeatureSlug(e.target.value)}
             disabled={inFlight}
           >
-            <option value="">Default feature</option>
+            <option value="">Default epic</option>
             {features.map((f) => (
               <option key={f.slug} value={f.slug}>
                 {f.emoji ? `${f.emoji} ` : ''}{f.title}

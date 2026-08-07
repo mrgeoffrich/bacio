@@ -34,7 +34,7 @@ export type NavItem = { view: string; label: string };
 export const NAV: NavItem[] = [
   { view: 'pipeline', label: 'Agentic Pipeline' },
   { view: 'board', label: 'Kanban' },
-  { view: 'features', label: 'Features' },
+  { view: 'features', label: 'Epics' },
   { view: 'docs', label: 'Documents' },
   { view: 'agents', label: 'Agents' },
   { view: 'history', label: 'History' },

@@ -106,7 +106,7 @@ export default function FeatureDependencyGraph({
   if (!layout.nodes.length) {
     return (
       <div className="mk-features-empty">
-        No issues in this feature yet.
+        No issues in this epic yet.
       </div>
     );
   }

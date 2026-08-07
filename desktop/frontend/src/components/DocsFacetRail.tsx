@@ -40,7 +40,7 @@ type StatusOption = { id: StatusFacet; label: string; countKey: NumericCountKey 
 const LINK_OPTIONS: LinkOption[] = [
   { id: 'all',      label: 'All',          countKey: 'total' },
   { id: 'issue',    label: 'Has issue',    countKey: 'withIssueLink' },
-  { id: 'feature',  label: 'Has feature',  countKey: 'withFeatureLink' },
+  { id: 'feature',  label: 'Has epic',     countKey: 'withFeatureLink' },
   { id: 'unlinked', label: 'Unlinked',     countKey: 'unlinked' },
 ];
 

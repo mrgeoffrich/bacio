@@ -143,7 +143,7 @@ func (f *featuresView) Help() string {
 	if f.overlay {
 		return "j/k scroll · g/G top/bottom · esc close"
 	}
-	return "j/k features · enter open · a archive · A unarchive · h handoffs · r reload · q quit"
+	return "j/k epics · enter open · a archive · A unarchive · h handoffs · r reload · q quit"
 }
 
 func (f *featuresView) Update(msg tea.Msg) tea.Cmd {
@@ -309,7 +309,7 @@ func (f *featuresView) renderList(width, height int) string {
 	header := lipgloss.NewStyle().
 		Bold(true).Foreground(lipgloss.Color("231")).Background(colHeaderFocus).
 		Width(innerWidth).Align(lipgloss.Center).
-		Render(fmt.Sprintf("Features · %d", len(f.features)))
+		Render(fmt.Sprintf("Epics · %d", len(f.features)))
 
 	// Body width reserves 1 col for the scrollbar that scrollableBlock pins
 	// to the right edge.
@@ -323,7 +323,7 @@ func (f *featuresView) renderList(width, height int) string {
 
 	var lines []string
 	if len(f.features) == 0 {
-		lines = append(lines, mutedStyle.Padding(1, 1).Render("— no features —"))
+		lines = append(lines, mutedStyle.Padding(1, 1).Render("— no epics —"))
 	}
 	// Each feature row spans 3 lines: slug, then up to 2 wrapped title
 	// lines. The same selection background paints all three so a focused
@@ -425,7 +425,7 @@ func (f *featuresView) renderDetail(width, height int) string {
 		return box.Render(errorStyle.Render(f.err.Error()))
 	}
 	if f.selected == nil {
-		return box.Foreground(mutedColor).Render("No feature selected.")
+		return box.Foreground(mutedColor).Render("No epic selected.")
 	}
 
 	feat := f.selected
@@ -521,7 +521,7 @@ func (f *featuresView) viewOverlay(width, height int) string {
 		return lipgloss.NewStyle().
 			Border(colBorder).BorderForeground(colFocusBorder).
 			Width(width-2).Height(height-2).Padding(1, 2).
-			Render("No feature selected.")
+			Render("No epic selected.")
 	}
 
 	contentWidth := width - 7

@@ -33,10 +33,11 @@ const {
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
-test('viewPath scopes routes to the prefix; board/docs keep their label aliases', () => {
+test('viewPath scopes routes to the prefix; board/docs/features keep their label aliases', () => {
   assert.equal(viewPath('BACI', 'board'), '/BACI/issues');
   assert.equal(viewPath('BACI', 'pipeline'), '/BACI/pipeline');
-  assert.equal(viewPath('BACI', 'features'), '/BACI/features');
+  // The `features` view id is internal; the URL follows the "Epics" tab label.
+  assert.equal(viewPath('BACI', 'features'), '/BACI/epics');
   assert.equal(viewPath('BACI', 'docs'), '/BACI/documents');
   assert.equal(viewPath('BACI', 'agents'), '/BACI/agents');
   assert.equal(viewPath('MINI', 'history'), '/MINI/history');
@@ -59,8 +60,10 @@ test('repoPrefixFromKey reads the prefix a cross-repo deep-link needs', () => {
   assert.equal(repoPrefixFromKey(undefined), '');
 });
 
-test('featurePath builds the prefixed feature detail route', () => {
-  assert.equal(featurePath('BACI', 'auth-rewrite'), '/BACI/features/auth-rewrite');
+test('featurePath builds the prefixed epic detail route', () => {
+  // The slug is the wire/CLI key and is unchanged; only the page segment
+  // follows the Epics rename.
+  assert.equal(featurePath('BACI', 'auth-rewrite'), '/BACI/epics/auth-rewrite');
 });
 
 test('documentPath URL-encodes the filename under the prefix', () => {
@@ -96,6 +99,11 @@ test('viewFromPath skips the prefix then inverts viewPath for the Topbar', () =>
   assert.equal(viewFromPath('/BACI/issues'), 'board');
   assert.equal(viewFromPath('/BACI/issues/BACI-100'), 'board');
   assert.equal(viewFromPath('/BACI/pipeline'), 'pipeline');
+  assert.equal(viewFromPath('/BACI/epics'), 'features');
+  assert.equal(viewFromPath('/BACI/epics/auth-rewrite'), 'features');
+  // A pre-rename /features link still resolves to the same view id, so the
+  // frame rendered before App's LegacyFeaturesRedirect fires keeps the Epics
+  // segment highlighted instead of flashing an unhighlighted nav.
   assert.equal(viewFromPath('/BACI/features'), 'features');
   assert.equal(viewFromPath('/BACI/features/auth-rewrite'), 'features');
   assert.equal(viewFromPath('/BACI/documents'), 'docs');

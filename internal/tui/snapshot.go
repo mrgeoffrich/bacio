@@ -44,7 +44,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 		repo: repo,
 		tabs: []tab{
 			{"Board", board},
-			{"Features", features},
+			{"Epics", features},
 			{"Documents", docs},
 			{"Agents", agents},
 			{"History", hist},

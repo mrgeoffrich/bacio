@@ -252,7 +252,7 @@ func (b *boardView) viewFeaturePicker(width, height int) string {
 		innerWidth = max(24, width-6)
 	}
 
-	header := boldStyle.Render("Visible features")
+	header := boldStyle.Render("Visible epics")
 	rowStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
 	selStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
 		Background(cardSelectedBG).Foreground(lipgloss.Color("231"))
@@ -272,7 +272,7 @@ func (b *boardView) viewFeaturePicker(width, height int) string {
 	var rows []string
 	rows = append(rows, header, "")
 	if len(b.featurePickerSlugs) == 0 {
-		rows = append(rows, mutedStyle.Italic(true).Render("(no features in this repo)"))
+		rows = append(rows, mutedStyle.Italic(true).Render("(no epics in this repo)"))
 	}
 	for i, slug := range b.featurePickerSlugs {
 		mark := "[×]"

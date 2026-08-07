@@ -116,7 +116,7 @@ export default function PerRepoSettingsSection({
         setDefaultFeatureSlug(out?.slug ?? '');
       }
     } catch (err) {
-      reportError(err, { headline: "Couldn't save default feature" });
+      reportError(err, { headline: "Couldn't save default epic" });
     } finally {
       setSavingDefaultFeature(false);
     }
@@ -163,7 +163,7 @@ export default function PerRepoSettingsSection({
     try {
       await api.setFeatureHiddenOnBoard(repoPrefix, slug, nextHidden);
     } catch (err) {
-      reportError(err, { headline: "Couldn't save feature visibility" });
+      reportError(err, { headline: "Couldn't save epic visibility" });
       // Snap back to the persisted truth.
       try {
         const feats = await api.listFeatures(repoPrefix);
@@ -219,20 +219,20 @@ export default function PerRepoSettingsSection({
           <section className="mk-settings-row">
             <div className="mk-settings-row-text">
               <div className="mk-settings-label">
-                Default feature ({repoPrefix})
+                Default epic ({repoPrefix})
               </div>
               <div className="mk-settings-hint">
                 BACI-235: when set, issues created without an explicit
-                feature auto-apply to this feature. An explicit feature on
+                epic auto-apply to this epic. An explicit epic on
                 the new-issue form always wins; deleting the referenced
-                feature clears the setting automatically.
+                epic clears the setting automatically.
               </div>
             </div>
             <select
               className="mk-tmpl-input"
               value={defaultFeatureSlug}
               disabled={savingDefaultFeature}
-              aria-label="Default feature for new issues"
+              aria-label="Default epic for new issues"
               onChange={e => changeDefaultFeature(e.target.value)}
             >
               <option value="">(none)</option>
@@ -280,18 +280,20 @@ export default function PerRepoSettingsSection({
               surfaces talk to the same per-repo KV. */}
           <section className="mk-settings-section">
             <div className="mk-settings-row-text">
-              <div className="mk-settings-label">Hidden features</div>
+              <div className="mk-settings-label">Hidden epics</div>
               <div className="mk-settings-hint">
-                Click a feature to hide every kanban card belonging to
+                Click an epic to hide every kanban card belonging to
                 it on this repo&apos;s board. Same flag as the &quot;Show on board&quot;
-                toggle on the Features screen; the surfaces stay in
+                toggle on the Epics screen; the surfaces stay in
                 lockstep.
               </div>
             </div>
             {featureSummaries.length === 0 ? (
+              // `bacio feature add` is the literal CLI verb — the Epics
+              // rename is display-only and stops at the shell prompt.
               <div className="mk-settings-section-empty">
-                This repo has no features yet. Add one with{' '}
-                <code>bacio feature add</code> or from the Features panel.
+                This repo has no epics yet. Add one with{' '}
+                <code>bacio feature add</code> or from the Epics panel.
               </div>
             ) : (
               <div className="mk-tmpl-states-chips">

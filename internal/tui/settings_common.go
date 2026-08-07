@@ -118,13 +118,13 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 	}
 	displayRow := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
 		Render(checkbox + " Show archived items  " +
-			mutedStyle.Render("(T to toggle — archived issues, docs, features remain hidden by default)"))
+			mutedStyle.Render("(T to toggle — archived issues, docs, epics remain hidden by default)"))
 
 	// BACI-235: one-line Default feature row, sibling of the show-archived
 	// row. Empty slug = unset (the legacy "featureless creates"
 	// behaviour). `D` on native cycles through the repo's features;
 	// `X` clears.
-	defaultLabel := "(none — featureless creates)"
+	defaultLabel := "(none — epicless creates)"
 	if defaultFeatureSlug != "" {
 		if defaultFeatureTitle != "" {
 			defaultLabel = defaultFeatureTitle + "  " + mutedStyle.Render("("+defaultFeatureSlug+")")
@@ -133,8 +133,8 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 		}
 	}
 	defaultRow := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
-		Render("Default feature: " + defaultLabel + "  " +
-			mutedStyle.Render("(D cycles · X clears — auto-applied to new issues without an explicit feature)"))
+		Render("Default epic: " + defaultLabel + "  " +
+			mutedStyle.Render("(D cycles · X clears — auto-applied to new issues without an explicit epic)"))
 
 	var rows []string
 	for i, st := range stages {

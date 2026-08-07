@@ -25,7 +25,12 @@ const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected rep
 // segment landing on one of these — instead of a known repo prefix — is
 // treated as a soft-redirect (rebase under the active repo's prefix)
 // rather than a hard 404 (RepoNotFound).
-const LEGACY_PAGE_WORDS = new Set(['pipeline', 'issues', 'features', 'documents', 'agents', 'history', 'monitor']);
+//
+// Both `epics` (the current Epics URL) and `features` (its pre-rename
+// spelling) are listed: a prefix-less legacy link is rebased under the
+// active prefix here, and App's LegacyFeaturesRedirect then forwards the
+// `/features` form on to `/epics`.
+const LEGACY_PAGE_WORDS = new Set(['pipeline', 'issues', 'epics', 'features', 'documents', 'agents', 'history', 'monitor']);
 
 // legacyPageWord reports whether the URL's first segment is one of the
 // recognised prefix-less page words — the signal that an unmatched prefix

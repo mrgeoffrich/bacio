@@ -275,7 +275,7 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector, dbPath strin
 		engine:     pipeline.New(s).WithLogger(log),
 		tabs: []tab{
 			{"Board", board},
-			{"Features", newFeaturesView(s, repo)},
+			{"Epics", newFeaturesView(s, repo)},
 			{"Documents", newDocsView(s, repo)},
 			{"Agents", newAgentsView(s, repo, tuiActor())},
 			{"History", newHistoryView(s, repo)},

@@ -304,7 +304,7 @@ export default function IssueWorkspace() {
         <aside className="mk-workspace-rail">
           {brief.feature && (
             <section className="mk-drawer-section">
-              <div className="mk-drawer-label">Feature</div>
+              <div className="mk-drawer-label">Epic</div>
               {/*
                 BACI-345: the feature badge links back to the parent
                 feature's detail page — same featurePath() target the

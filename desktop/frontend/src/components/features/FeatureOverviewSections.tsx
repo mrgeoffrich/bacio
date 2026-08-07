@@ -53,7 +53,7 @@ export default function FeatureOverviewSections({
           <div
             className="mk-segmented"
             role="group"
-            aria-label="Feature state"
+            aria-label="Epic state"
           >
             {FEATURE_STATE_OPTIONS.map((opt) => {
               const current = detail.state || 'active';
@@ -81,37 +81,37 @@ export default function FeatureOverviewSections({
 
         <FeaturePropertyToggle
           label="Auto Close"
-          ariaLabel="Auto-close this feature when every child is terminal"
+          ariaLabel="Auto-close this epic when every child is terminal"
           options={AUTO_CLOSE_OPTIONS}
           value={!detail.stateManual}
           persist={(next) => api.setFeatureAutoClose(activeBoard, detail.slug, next)}
           onApplied={(updated) => reconcile(updated)}
           errorHeadline="Couldn't update auto-close"
-          hint="When on, the auto-completion sweep can promote this feature to done/cancelled once every child issue is terminal. Turn off for long-lived catch-all features."
+          hint="When on, the auto-completion sweep can promote this epic to done/cancelled once every child issue is terminal. Turn off for long-lived catch-all epics."
         />
 
         <FeaturePropertyToggle
           label="Collect handoffs"
-          ariaLabel="Collect worker handoff comments on this feature"
+          ariaLabel="Collect worker handoff comments on this epic"
           options={COLLECT_HANDOFFS_OPTIONS}
           value={detail.collectHandoffs}
           persist={(next) => api.setFeatureCollectHandoffs(activeBoard, detail.slug, next)}
           onApplied={(updated) => reconcile(updated)}
           errorHeadline="Couldn't update collect-handoffs"
           hint="When on, worker close-outs append a handoff comment so siblings inherit context. Turn off for standing buckets like bugs / maintenance."
-          hintTitle="When on, implement-worker close-outs append a handoff comment to this feature so sibling workers inherit context. Turn off for standing bucket features whose unrelated children make handoffs noise."
+          hintTitle="When on, implement-worker close-outs append a handoff comment to this epic so sibling workers inherit context. Turn off for standing bucket epics whose unrelated children make handoffs noise."
         />
 
         <FeaturePropertyToggle
           label="Show on board"
-          ariaLabel="Show this feature's cards on the board"
+          ariaLabel="Show this epic's cards on the board"
           options={SHOW_ON_BOARD_OPTIONS}
           value={!detail.hiddenOnBoard}
           persist={(next) => api.setFeatureHiddenOnBoard(activeBoard, detail.slug, !next)}
           onApplied={(updated) => reconcile(updated, onChangeHidden)}
           errorHeadline="Couldn't update visibility"
-          hint="Hide this feature's cards from the kanban board."
-          hintTitle="When hidden, every kanban card belonging to this feature is dropped from the board on this machine. Lives alongside the TUI feature picker."
+          hint="Hide this epic's cards from the kanban board."
+          hintTitle="When hidden, every kanban card belonging to this epic is dropped from the board on this machine. Lives alongside the TUI epic picker."
         />
 
         <FeatureBranchEditor

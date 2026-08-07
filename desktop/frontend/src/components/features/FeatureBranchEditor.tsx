@@ -153,9 +153,9 @@ export default function FeatureBranchEditor({
       {error && <p className="mk-features-prop-error">{error}</p>}
       <p
         className="mk-features-prop-hint"
-        title="Sets the per-feature integration branch. New dispatches under this feature target the named branch; in-flight work keeps its current base."
+        title="Sets the per-epic integration branch. New dispatches under this epic target the named branch; in-flight work keeps its current base."
       >
-        Issues under this feature ship to this branch instead of <code>main</code>.
+        Issues under this epic ship to this branch instead of <code>main</code>.
       </p>
     </div>
   );

@@ -41,7 +41,7 @@ export default function FeatureDetailPane({
       <div
         className="mk-features-viewmode mk-segmented"
         role="tablist"
-        aria-label="Feature view mode"
+        aria-label="Epic view mode"
       >
         {VIEW_MODE_OPTIONS.map((opt) => (
           <button
