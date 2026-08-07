@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { Board } from '../api';
 import Modal from './Modal';
+import Shelf from './Shelf';
 import Icon from './Icon';
 import { WEB_MODE } from '../env';
 import { useActiveRepo } from '../state/RepoProvider';
@@ -14,9 +15,23 @@ import './workspace/workspace.css';
 // typing. Null when the modal is closed.
 type AddWebState = { path: string; name: string; prefix: string };
 
-// RepoPicker is the topbar's repository selector — a searchable dropdown that
-// replaces the plain native <select>. Clicking the trigger opens a menu with
-// a filter input, the matching repos, and the two ways to add a project.
+// RepoPicker is the topbar's repository selector. Clicking the trigger
+// opens a right-docked <Shelf> with a filter input, the matching repos
+// grouped by kind, and the two ways to add a project.
+//
+// It was an anchored 280px dropdown until the list outgrew it: with
+// workspaces alongside git repos there are simply more rows than a
+// popover under the trigger can show without its own inner scrollbar.
+// The shelf is full-height, so the list gets the whole viewport.
+//
+// Moving to <Shelf> (Radix Dialog) also deleted this component's
+// hand-rolled dismissal: an outside-click + Escape listener plus a
+// `modalOpen` flag that had to suspend it while WorkspaceCreateModal or
+// the web add-repo Modal was open, because those portal outside the
+// picker's subtree and a click inside one would otherwise dismiss the
+// dropdown and unmount the modal mid-edit. Radix's dismissable-layer
+// stack handles that: the child modal is the topmost layer, so Escape
+// and outside-pointer-down dismiss it and leave the shelf open.
 //
 // **Add Git Repository…** forks on WEB_MODE: desktop pops a native folder
 // picker via Wails, web pops a path-input modal that POSTs the typed path
@@ -62,39 +77,18 @@ export default function RepoPicker() {
   // provider's board list carries the new prefix would flash RepoNotFound;
   // the effect below waits for the refreshed list instead.
   const [pendingPrefix, setPendingPrefix] = useState('');
-  const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const active = boards.find((b: Board) => b.prefix === activeBoard);
   const label = active?.name || activeBoard || 'Select repository';
 
-  // While open: focus the filter, and close on Escape or an outside click.
-  // The outside-click handler is suspended while either add modal is open
-  // so a click inside the modal (which portals outside rootRef) doesn't
-  // dismiss the dropdown underneath it, unmounting the modal mid-edit.
-  const modalOpen = !!addingWeb || addingWorkspace;
-  useEffect(() => {
-    if (!open) {
-      setQuery('');
-      return;
-    }
-    inputRef.current?.focus();
-    const onDown = (e: MouseEvent) => {
-      if (modalOpen) return;
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (modalOpen) return; // the modal handles its own Escape
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open, modalOpen]);
+  // Dismissal is Shelf's (Radix's) job now — including keeping the shelf
+  // open behind a child modal. All that's left is resetting the filter so
+  // the next open starts clean.
+  const closeShelf = () => {
+    setOpen(false);
+    setQuery('');
+  };
 
   // A workspace is created through the api seam directly (RepoProvider's
   // addRepository is the git path and owns the folder picker), so the
@@ -115,8 +109,12 @@ export default function RepoPicker() {
   // place for "snapshot on open" — an effect would fight the deps lint
   // and re-rank on every poll tick.
   const toggleMenu = () => {
-    if (!open) setOrder(rankRepos(boards, byPrefix).map((b: Board) => b.prefix));
-    setOpen(o => !o);
+    if (open) {
+      closeShelf();
+      return;
+    }
+    setOrder(rankRepos(boards, byPrefix).map((b: Board) => b.prefix));
+    setOpen(true);
   };
 
   // Render order: the frozen snapshot, with any repo added mid-session
@@ -152,7 +150,7 @@ export default function RepoPicker() {
 
   const pick = (prefix: string) => {
     onPick(prefix);
-    setOpen(false);
+    closeShelf();
   };
 
   // renderRow is shared by both sections — one row shape, two groupings.
@@ -194,7 +192,7 @@ export default function RepoPicker() {
 
   // Desktop path: hand straight off to the native folder picker.
   const addDesktop = () => {
-    setOpen(false);
+    closeShelf();
     onAddRepository();
   };
 
@@ -205,7 +203,7 @@ export default function RepoPicker() {
   };
   const onWorkspaceCreated = (board: Board) => {
     setAddingWorkspace(false);
-    setOpen(false);
+    closeShelf();
     // Pull the new row into the provider's list, then let the effect above
     // route to it once it's there.
     refreshBoards();
@@ -240,7 +238,7 @@ export default function RepoPicker() {
       });
       if (result) {
         setAddingWeb(null);
-        setOpen(false);
+        closeShelf();
       }
     } catch (err) {
       // App.tsx already routes the failure through the global error
@@ -254,11 +252,11 @@ export default function RepoPicker() {
   };
 
   return (
-    <div className="mk-repo-picker" ref={rootRef}>
+    <div className="mk-repo-picker">
       <button
         className="mk-repo-picker-trigger"
         onClick={toggleMenu}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
         aria-expanded={open}
       >
         <Icon name="branch" />
@@ -277,29 +275,17 @@ export default function RepoPicker() {
         )}
       </button>
 
-      {open && (
-        <div className="mk-repo-picker-menu" role="listbox">
-          <input
-            ref={inputRef}
-            className="mk-repo-picker-search"
-            type="text"
-            placeholder="Search repositories…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <div className="mk-repo-picker-list">
-            {filtered.length === 0 ? (
-              <div className="mk-repo-picker-empty">No matching repositories.</div>
-            ) : (
-              <>
-                {renderGroup('Repositories', groups.git)}
-                {renderGroup('Workspaces', groups.workspaces)}
-              </>
-            )}
-          </div>
-          {/* Two ways in, not one. The git option keeps today's behaviour
-              verbatim on both transports; the workspace option is the
-              same modal everywhere. */}
+      <Shelf
+        open={open}
+        onClose={closeShelf}
+        title="Switch project"
+        // Radix would otherwise focus the first tabbable node (the close
+        // button); the filter is the useful landing spot.
+        onOpenAutoFocus={(e) => { e.preventDefault(); inputRef.current?.focus(); }}
+        footer={
+          /* Two ways in, not one. The git option keeps today's behaviour
+             verbatim on both transports; the workspace option is the
+             same modal everywhere. */
           <div className="mk-repo-picker-add-group">
             <button
               className="mk-repo-picker-add"
@@ -316,80 +302,104 @@ export default function RepoPicker() {
               New Workspace…
             </button>
           </div>
-        </div>
-      )}
-
-      <WorkspaceCreateModal
-        open={addingWorkspace}
-        onClose={() => setAddingWorkspace(false)}
-        onCreated={onWorkspaceCreated}
-      />
-
-      <Modal
-        open={!!addingWeb}
-        onClose={() => { if (!submitting) closeWebModal(); }}
-        title="Add Git Repository"
+        }
       >
-        {addingWeb && (
-          <>
-            <p className="mk-settings-hint">
-              Path is on the server&apos;s filesystem
-              {' '}({window.location.host || 'this host'}), not your local machine.
-              Point at the git working tree you want bacio to track.
-            </p>
-            <label className="mk-tmpl-add-field">
-              <span>Path</span>
-              <input
-                autoFocus
-                className="mk-tmpl-input"
-                value={addingWeb.path}
-                placeholder="/Users/you/Code/my-project"
-                onChange={e => setAddingWeb({ ...addingWeb, path: e.target.value })}
-              />
-            </label>
-            <label className="mk-tmpl-add-field">
-              <span>Name</span>
-              <input
-                className="mk-tmpl-input"
-                value={addingWeb.name}
-                placeholder="my-project"
-                onChange={e => setAddingWeb({ ...addingWeb, name: e.target.value })}
-              />
-            </label>
-            <label className="mk-tmpl-add-field">
-              <span>Prefix (optional)</span>
-              <input
-                className="mk-tmpl-input"
-                value={addingWeb.prefix}
-                placeholder="MYPR (auto-allocated if blank)"
-                maxLength={4}
-                onChange={e => setAddingWeb({ ...addingWeb, prefix: e.target.value })}
-              />
-            </label>
-            {addError && (
-              <p className="mk-settings-hint" style={{ color: 'var(--status-blocked, #d44)' }}>
-                {addError}
+        <input
+          ref={inputRef}
+          className="mk-repo-picker-search"
+          type="text"
+          placeholder="Search repositories…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {/* role="listbox" sits on the scrolling list itself — the shelf
+            around it is a dialog, not a listbox. */}
+        <div className="mk-repo-picker-list" role="listbox" aria-label="Projects">
+          {filtered.length === 0 ? (
+            <div className="mk-repo-picker-empty">No matching repositories.</div>
+          ) : (
+            <>
+              {renderGroup('Repositories', groups.git)}
+              {renderGroup('Workspaces', groups.workspaces)}
+            </>
+          )}
+        </div>
+
+        {/* Both add-modals render inside the shelf. Radix stacks them as
+            the topmost dismissable layer, so Escape / an outside click
+            closes just the modal and the shelf stays put. */}
+        <WorkspaceCreateModal
+          open={addingWorkspace}
+          onClose={() => setAddingWorkspace(false)}
+          onCreated={onWorkspaceCreated}
+        />
+
+        <Modal
+          open={!!addingWeb}
+          onClose={() => { if (!submitting) closeWebModal(); }}
+          title="Add Git Repository"
+        >
+          {addingWeb && (
+            <>
+              <p className="mk-settings-hint">
+                Path is on the server&apos;s filesystem
+                {' '}({window.location.host || 'this host'}), not your local machine.
+                Point at the git working tree you want bacio to track.
               </p>
-            )}
-            <div className="mk-modal-actions">
-              <button
-                className="mk-segmented-btn"
-                onClick={closeWebModal}
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                className="mk-segmented-btn is-active"
-                onClick={submitWebAdd}
-                disabled={submitting}
-              >
-                {submitting ? 'Adding…' : 'Add'}
-              </button>
-            </div>
-          </>
-        )}
-      </Modal>
+              <label className="mk-tmpl-add-field">
+                <span>Path</span>
+                <input
+                  autoFocus
+                  className="mk-tmpl-input"
+                  value={addingWeb.path}
+                  placeholder="/Users/you/Code/my-project"
+                  onChange={e => setAddingWeb({ ...addingWeb, path: e.target.value })}
+                />
+              </label>
+              <label className="mk-tmpl-add-field">
+                <span>Name</span>
+                <input
+                  className="mk-tmpl-input"
+                  value={addingWeb.name}
+                  placeholder="my-project"
+                  onChange={e => setAddingWeb({ ...addingWeb, name: e.target.value })}
+                />
+              </label>
+              <label className="mk-tmpl-add-field">
+                <span>Prefix (optional)</span>
+                <input
+                  className="mk-tmpl-input"
+                  value={addingWeb.prefix}
+                  placeholder="MYPR (auto-allocated if blank)"
+                  maxLength={4}
+                  onChange={e => setAddingWeb({ ...addingWeb, prefix: e.target.value })}
+                />
+              </label>
+              {addError && (
+                <p className="mk-settings-hint" style={{ color: 'var(--status-blocked, #d44)' }}>
+                  {addError}
+                </p>
+              )}
+              <div className="mk-modal-actions">
+                <button
+                  className="mk-segmented-btn"
+                  onClick={closeWebModal}
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="mk-segmented-btn is-active"
+                  onClick={submitWebAdd}
+                  disabled={submitting}
+                >
+                  {submitting ? 'Adding…' : 'Add'}
+                </button>
+              </div>
+            </>
+          )}
+        </Modal>
+      </Shelf>
     </div>
   );
 }

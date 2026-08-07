@@ -148,4 +148,37 @@ describe('RepoPicker', () => {
     render(<RepoPicker />);
     expect(screen.getByText('Workspace')).toBeInTheDocument();
   });
+
+  // The picker used to hand-roll outside-click + Escape dismissal, with a
+  // `modalOpen` flag suspending it while a child modal was open — without
+  // that suspension a click inside the modal (which portals outside the
+  // picker's subtree) dismissed the dropdown and unmounted the modal
+  // mid-edit. Moving to <Shelf> deleted that machinery and handed both
+  // behaviours to Radix's dismissable-layer stack. These two specs pin the
+  // behaviour, not the mechanism, so the next refactor can't lose it.
+  it('closes the shelf on Escape', async () => {
+    hoisted.boards = [board('AAAA')];
+    render(<RepoPicker />);
+    openMenu();
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('option')).not.toBeInTheDocument());
+  });
+
+  it('Escape over a child modal closes only the modal, leaving the shelf open', async () => {
+    hoisted.boards = [board('AAAA')];
+    render(<RepoPicker />);
+    openMenu();
+    fireEvent.click(screen.getByText('New Workspace…'));
+    const nameField = await screen.findByPlaceholderText('Marketing');
+
+    fireEvent.keyDown(nameField, { key: 'Escape' });
+
+    // The modal is gone…
+    await waitFor(() => expect(screen.queryByPlaceholderText('Marketing')).not.toBeInTheDocument());
+    // …and the shelf underneath it is still open and usable.
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(screen.getByPlaceholderText(/Search repositories/)).toBeInTheDocument();
+  });
 });

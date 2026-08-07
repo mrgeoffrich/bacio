@@ -51,15 +51,19 @@
 
 /* ── Repo picker: the two-option add footer ─────────────────────────── */
 
+/* No border-top of its own: the group is the shelf's footer slot, and
+   .mk-shelf-foot already draws the rule separating it from the list. */
 .mk-repo-picker-add-group {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border-1);
 }
 /* The buttons keep .mk-repo-picker-add's own styling; the group only
-   needs to stop the first one drawing a second divider. */
+   needs to stop the first one drawing a second divider, and to drop the
+   stray top margin that spaced it off a dropdown's row list. */
 .mk-repo-picker-add-group .mk-repo-picker-add {
   border-top: none;
+  margin-top: 0;
+  padding: 12px 18px;
 }
 .mk-repo-picker-add-group .mk-repo-picker-add + .mk-repo-picker-add {
   border-top: 1px solid var(--border-1);
