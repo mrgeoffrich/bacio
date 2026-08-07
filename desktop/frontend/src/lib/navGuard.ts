@@ -21,6 +21,29 @@ import { useEffect, useRef } from 'react';
 // One slot is enough: only one guarded route is mounted at a time. The
 // unregister restores whatever was installed before it, so an unmount in
 // an unexpected order can't strand a stale guard.
+//
+// ── What this does NOT cover ─────────────────────────────────────────
+//
+// It is an allowlist of in-app entry points, so it only sees navigations
+// that call `requestNavigation`. Every current shell exit does — the
+// Topbar tabs, the Settings gear, the Sync pill, the repo picker, the
+// create menu, `openIssue` / `openCard` — but a HISTORY POP does not, and
+// cannot: browser Back/Forward, the mouse back button and a trackpad
+// swipe all reach the router without passing through any of our code.
+// `popstate` fires after the entry has already changed, so the only way
+// to "cancel" one is to push a compensating entry back, which corrupts
+// the back stack for every unguarded page and fights `navigate(-1)` in
+// `closeIssue`. `beforeunload` (in EditEpicPage) covers reload and tab
+// close; the back button is the remaining hole.
+//
+// Closing it properly means a DATA ROUTER: replace `<BrowserRouter>` in
+// main.tsx with `createBrowserRouter` + `<RouterProvider>`, move the
+// `<Routes>` tree in App.tsx into a route-object array, and swap this
+// module for `useBlocker`, which the router calls for pops as well as
+// pushes. The work is in the move: the providers currently sit above
+// `<Routes>` and read `useLocation`, so they would have to become a
+// layout route, and the Settings overlay branch that swaps `<Routes>` out
+// wholesale would have to become a real route first.
 
 // A guard returns true when it has taken the navigation over, false when
 // navigation may continue immediately.

@@ -168,6 +168,48 @@ describe('AddCardsMenu', () => {
     expect(onCreate).toHaveBeenCalledTimes(1);
   });
 
+  it('does nothing on Enter when the search matched nothing', () => {
+    // The create row lights up when the panel OPENS empty, because it is
+    // then the only actionable thing. A list the query emptied is a
+    // different state: the user aimed at a card, and turning that ⏎ into a
+    // composer is not a near miss, it is a different action.
+    const { onAdd, onCreate } = open();
+    const input = screen.getByLabelText('Search issues to add to Doing');
+    fireEvent.change(input, { target: { value: 'zzz' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(onAdd).not.toHaveBeenCalled();
+    // And the popover is still there to keep typing in.
+    expect(input).toBeInTheDocument();
+  });
+
+  it('does nothing on Enter once the last candidate has been placed', () => {
+    const onAdd = vi.fn();
+    const onCreate = vi.fn();
+    const { rerender } = render(
+      <AddCardsMenu laneName="Doing" candidates={[makeCard('BACI-1', 'Fix login flow')]} onAdd={onAdd} onCreate={onCreate} />,
+    );
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Add or create cards in Doing' }), { key: 'Enter' });
+    const input = screen.getByLabelText('Search issues to add to Doing');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onAdd).toHaveBeenCalledWith('BACI-1');
+
+    // The parent's optimistic update drops the placed card, so a
+    // rapid-fire third ⏎ of a multi-add run lands on an empty list.
+    rerender(<AddCardsMenu laneName="Doing" candidates={[]} onAdd={onAdd} onCreate={onCreate} />);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it('lets an arrow key reach create deliberately when nothing matches', () => {
+    const { onCreate } = open();
+    const input = screen.getByLabelText('Search issues to add to Doing');
+    fireEvent.change(input, { target: { value: 'zzz' } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+
   it('explains an empty candidate list instead of showing a blank popover', () => {
     render(<AddCardsMenu laneName="Doing" candidates={[]} onAdd={vi.fn()} onCreate={vi.fn()} />);
     fireEvent.keyDown(screen.getByRole('button', { name: 'Add or create cards in Doing' }), { key: 'Enter' });

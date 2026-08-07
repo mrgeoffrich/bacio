@@ -38,6 +38,15 @@ export function deriveSlug(title: string): string {
   return s;
 }
 
+// previewSlug is deriveSlug for a FIELD rather than for a title: an input
+// the user has emptied means "no slug", not "an epic called `feature`", so
+// blank input short-circuits before store.Slugify's EMPTY_SLUG fallback.
+// The create form drives both its preview and its submitted value from
+// this, so what is shown and what is sent can never disagree.
+export function previewSlug(input: string): string {
+  return input.trim() ? deriveSlug(input) : '';
+}
+
 // RESERVED_SLUGS are slugs the UI refuses because the router has already
 // spent them. `new` is the whole list: `featurePath(prefix, 'new')` emits
 // `/PREFIX/epics/new`, which is the New Epic page's own address, so an
@@ -48,9 +57,9 @@ export function deriveSlug(title: string): string {
 // would also constrain `bacio feature add` and could reject an
 // already-existing row on its next edit — a store-boundary change for a
 // router-shaped problem. NewEpicPage additionally guards the route: if an
-// epic slugged `new` somehow exists (created by the CLI before this
-// shipped), the page redirects to its detail route rather than shadowing
-// it forever.
+// epic slugged `new` somehow exists (created by the CLI, which does not
+// reserve the word), the page explains the clash instead of rendering a
+// create form that could never be reached.
 export const RESERVED_SLUGS: ReadonlySet<string> = new Set(['new']);
 
 export function isReservedSlug(slug: string): boolean {
@@ -58,11 +67,18 @@ export function isReservedSlug(slug: string): boolean {
 }
 
 // slugTaken returns the epic already holding this slug, or null. The
-// caller has the full list loaded already (FeaturesView / NewEpicPage
+// caller has the epic list loaded already (FeaturesView / NewEpicPage
 // both fetch it), so the collision check is local and instant — and the
 // message can name the culprit by TITLE, which is the useful thing: the
 // most likely reason you hit this is that the epic you are creating
 // already exists.
+//
+// The list it searches is only what `api.listFeatures` returned, and that
+// call honours the global show-archived display preference (off by
+// default). An archived epic still holds its row in UNIQUE(repo_id, slug),
+// so this check can miss one and the server rejection is the real
+// backstop — which is why the create form's collision banner names
+// archiving as a possibility.
 export function slugTaken(features: FeatureSummary[], slug: string): FeatureSummary | null {
   if (!slug) return null;
   return features.find((f) => f.slug === slug) ?? null;

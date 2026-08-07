@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { ChevronLeft } from 'lucide-react';
 import * as api from '../../api';
 import type { FeatureSummary } from '../../api';
@@ -12,9 +12,9 @@ import FeatureEmojiPicker from '../FeatureEmojiPicker';
 import {
   SLUG_MAX_LEN,
   checkSlug,
-  deriveSlug,
   errorMessage,
   isSlugCollisionError,
+  previewSlug,
 } from './epicForm';
 
 // NewEpicPage — the full-screen `/:prefix/epics/new` create form.
@@ -34,12 +34,17 @@ import {
 // equivalents stay as the backstop. The one that matters is the slug
 // collision — `features` has UNIQUE(repo_id, slug) and store.CreateFeature
 // does not pre-check, so a duplicate would otherwise surface as raw SQLite
-// text. The full epic list is already loaded here, so we refuse before the
-// round trip and keep isSlugCollisionError as the fallback for the race.
+// text. The epic list is already loaded here, so we refuse before the
+// round trip and keep isSlugCollisionError as the fallback.
+//
+// That fallback carries two cases, not one: a genuine race, and an
+// ARCHIVED epic holding the slug. `api.listFeatures` honours the global
+// show-archived preference (off by default) while UNIQUE(repo_id, slug)
+// does not, so the local check can pass on a slug the server will refuse.
+// The banner names archiving for that reason.
 export default function NewEpicPage() {
   const { activeBoard } = useActiveRepo();
   const navigate = useNavigate();
-  const location = useLocation();
   const repoSelected = !!activeBoard && activeBoard !== 'all';
 
   // The epic list backs the local collision check and the route guard
@@ -86,24 +91,35 @@ export default function NewEpicPage() {
   const markInteracted = () => { interacted.current = true; };
 
   const trimmedTitle = title.trim();
-  const derived = trimmedTitle ? deriveSlug(trimmedTitle) : '';
-  const slug = slugEdited ? deriveSlug(slugDraft) : derived;
+  const derived = previewSlug(trimmedTitle);
+  // The slug the epic will actually be created at. previewSlug, not
+  // deriveSlug: an emptied slug field must stay empty rather than falling
+  // back to store.Slugify's `feature`.
+  const slug = slugEdited ? previewSlug(slugDraft) : derived;
   const slugProblem = checkSlug(features, slug);
+  // An edited-but-empty slug is the user clearing the field, which has no
+  // sensible submission — Reset puts it back on the title.
+  const slugEmpty = slugEdited && !slug;
+  // The input holds what was typed; `slug` holds what store.Slugify will
+  // make of it. Say so when they differ, so the URL preview never claims
+  // an address the create will not use.
+  const slugNormalised = slugEdited && !!slug && slugDraft !== slug;
   const branchCheck = isValidBranchName(branch);
   const branchError = branch && !branchCheck.ok ? branchCheck.reason : '';
   // The derived slug is capped at 60 characters by store.Slugify. Say so
   // when we hit it — otherwise the user is looking at a slug that isn't
   // the slug they think they typed.
-  const slugTruncated = !slugEdited && deriveSlug(trimmedTitle).length >= SLUG_MAX_LEN;
+  const slugTruncated = !slugEdited && derived.length >= SLUG_MAX_LEN;
 
-  const canSubmit = !!trimmedTitle && !slugProblem && !branchError && !inFlight;
+  const canSubmit = !!trimmedTitle && !slugProblem && !slugEmpty && !branchError && !inFlight;
 
+  // The back link, Cancel and Escape all say "Epics", so all three land on
+  // the Epics list. Popping history instead would send them wherever the
+  // user came from — the Kanban, a document — which is not what the label
+  // promises.
   const backToList = useCallback(() => {
-    // A deep link / a reload has no in-app history to pop. react-router
-    // stamps the first entry of a session with key 'default'.
-    if (location.key !== 'default') navigate(-1);
-    else navigate(viewPath(activeBoard, 'features'));
-  }, [activeBoard, location.key, navigate]);
+    navigate(viewPath(activeBoard, 'features'));
+  }, [activeBoard, navigate]);
 
   const submit = useCallback(
     async (e?: FormEvent) => {
@@ -128,7 +144,8 @@ export default function NewEpicPage() {
         setInFlight(false);
         setBanner(
           isSlugCollisionError(err)
-            ? `An epic with the slug “${slug}” already exists in this space. Pick another slug.`
+            ? `An epic with the slug “${slug}” already exists in this space. ` +
+              'It may be archived, and so hidden from the Epics list. Pick another slug.'
             : errorMessage(err),
         );
       }
@@ -144,22 +161,56 @@ export default function NewEpicPage() {
     );
   }
 
-  // Belt-and-braces route guard. `store.Slugify("New")` is "new", so an
-  // epic created through the CLI with that slug would be shadowed by this
-  // page forever — react-router ranks the static `new` segment above
-  // `:slug`, so `featurePath(prefix, 'new')` can never reach it.
+  // `store.Slugify("New")` is "new", so an epic created through the CLI
+  // with that slug collides with this page's own address — react-router
+  // ranks the static `new` segment above `:slug`, so
+  // `featurePath(prefix, 'new')` can never reach the epic. The create form
+  // refuses the slug (RESERVED_SLUGS), so only the CLI can produce this.
   //
-  // DEVIATION, deliberate: the plan and the design both say to Navigate to
-  // "its detail route", but that route IS this page — the redirect would
-  // loop. The nearest reachable address for that epic is its Edit page
-  // (`/:prefix/epics/new/edit`), which is a strictly deeper path and
-  // therefore uncontested, so the guard sends the user there instead. The
-  // epic stays visible and editable; the cost is that creating a new epic
-  // in that space needs the CLI-created `new` epic renamed first. The
-  // create form itself refuses the slug (RESERVED_SLUGS), so the UI can
-  // never put a space into this state.
-  if (features.some((f) => f.slug === 'new')) {
-    return <Navigate to={editEpicPath(activeBoard, 'new')} replace />;
+  // Two different intents land on this URL — "create an epic" and "open
+  // the epic slugged new" — and neither can be served, so the page says
+  // that rather than silently redirecting to a form the user did not ask
+  // for. There is no slug rename in the CLI either (`bacio feature edit`
+  // covers title / description / emoji / branch), so the honest way out is
+  // `bacio feature add`, which is unaffected by the clash.
+  const clashing = features.find((f) => f.slug === 'new');
+  if (clashing) {
+    return (
+      <div className="mk-pe">
+        <header className="mk-pe-head">
+          <button type="button" className="mk-epic-back" onClick={backToList}>
+            <ChevronLeft size={14} strokeWidth={2} aria-hidden="true" />
+            <span>Epics</span>
+          </button>
+          <div className="mk-pe-title">
+            <span className="mk-pe-name">This address is taken</span>
+          </div>
+        </header>
+        <div className="mk-pe-banner is-error" role="alert">
+          An epic in {activeBoard} already uses the slug <code>new</code>, which is
+          this page’s own address. The New Epic form can’t open here, and that
+          epic’s detail pane isn’t reachable at this URL either.
+        </div>
+        <p className="mk-features-prop-hint">
+          Slugs can’t be renamed from the app or the CLI. Create the epic you
+          wanted with <code>bacio feature add</code> instead, which is unaffected —
+          or open <strong>{clashing.emoji ? `${clashing.emoji} ` : ''}{clashing.title}</strong>{' '}
+          below to edit everything about it except its slug.
+        </p>
+        <footer className="mk-pe-foot">
+          <button type="button" className="mk-btn-secondary" onClick={backToList}>
+            Back to Epics
+          </button>
+          <button
+            type="button"
+            className="mk-btn-primary"
+            onClick={() => navigate(editEpicPath(activeBoard, 'new'))}
+          >
+            Edit the “new” epic
+          </button>
+        </footer>
+      </div>
+    );
   }
 
   return (
@@ -189,10 +240,15 @@ export default function NewEpicPage() {
         onPointerDownCapture={markInteracted}
         onKeyDownCapture={markInteracted}
         onKeyDown={(e: KeyboardEvent<HTMLFormElement>) => {
-          if (e.key === 'Escape' && !inFlight) {
-            e.preventDefault();
-            backToList();
-          }
+          if (e.key !== 'Escape' || inFlight) return;
+          // The emoji picker portals its menu out of this subtree, but
+          // React still bubbles the event through the tree — so the
+          // Escape that dismissed the picker would otherwise cancel the
+          // whole form. Only a keystroke that landed inside the form is
+          // ours.
+          if (!(e.target instanceof Node) || !e.currentTarget.contains(e.target)) return;
+          e.preventDefault();
+          backToList();
         }}
       >
         {/* Emoji + title on one row, mirroring the detail pane's title row
@@ -255,7 +311,7 @@ export default function NewEpicPage() {
               </button>
             )}
           </div>
-          <div className={`mk-epic-slug${slugProblem ? ' is-error' : ''}`}>
+          <div className={`mk-epic-slug${slugProblem || slugEmpty ? ' is-error' : ''}`}>
             <span className="mk-epic-slug-prefix">/{activeBoard}/epics/</span>
             {slugEdited ? (
               <input
@@ -275,6 +331,16 @@ export default function NewEpicPage() {
               </span>
             )}
           </div>
+          {slugEmpty && (
+            <p className="mk-features-prop-error" role="alert">
+              Give the epic a slug, or press Reset to follow the title again.
+            </p>
+          )}
+          {slugNormalised && (
+            <p className="mk-features-prop-hint">
+              Will be created as <code>{slug}</code>.
+            </p>
+          )}
           {slugProblem?.kind === 'reserved' && (
             <p className="mk-features-prop-error" role="alert">
               <code>new</code> is reserved — it is this page’s own address. Try <code>new-thing</code>.

@@ -206,10 +206,12 @@ export function RepoProvider({ children }: { children: ReactNode }) {
 
   // Open a card's workspace by routing to /issues/:key. Settings dismissal
   // (when reached from the command palette over the Settings overlay) is
-  // handled by Shell, which owns the overlay flag.
+  // handled by Shell, which owns the overlay flag. Guarded like its two
+  // siblings above — the command palette opens over any page, including one
+  // holding unsaved work.
   const openCard = useCallback((card: BoardCard) => {
     if (!card?.key) return;
-    navigate(issuePath(activeBoard, card.key));
+    requestNavigation(() => navigate(issuePath(activeBoard, card.key)));
   }, [navigate, activeBoard]);
 
   // BACI-294: open the full-screen Edit Process editor for an in_pipeline

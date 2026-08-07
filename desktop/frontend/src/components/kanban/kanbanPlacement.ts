@@ -12,22 +12,29 @@ function densify(cards: KanbanColumn['cards']): KanbanColumn['cards'] {
 }
 
 // placeCardInLane is the optimistic half of a drag-drop: take `key` out of
-// whichever lane holds it and append it to `toUuid`. Appending (rather than
-// inserting at a drop index) mirrors the write the board issues —
-// `moveIssueToKanbanColumn(..., position: null)`.
+// whichever lane holds it and insert it into `toUuid`. `at` is the 0-based
+// index to insert at and must match the `position` the caller persists —
+// omit it (the drop handler's case) to append, mirroring
+// `moveIssueToKanbanColumn(..., position: null)`; pass 0 for a write that
+// pins the card to the top. A mismatch paints the card in one place and
+// then animates it to another when the server board lands.
 //
 // A card that isn't on the board yet has no source lane to leave, so the
-// removal pass simply no-ops and the append opts it in — which is exactly
+// removal pass simply no-ops and the insert opts it in — which is exactly
 // what dropping a card onto a lane means on a git repo.
 export function placeCardInLane(
   columns: KanbanColumn[],
   key: string,
   toUuid: string,
+  at?: number,
 ): KanbanColumn[] {
   return columns.map(col => {
     if (col.uuid === toUuid) {
       const without = col.cards.filter(ref => ref.key !== key);
-      return { ...col, cards: densify([...without, { key, position: without.length }]) };
+      const index = Math.max(0, Math.min(at ?? without.length, without.length));
+      const next = [...without];
+      next.splice(index, 0, { key, position: index });
+      return { ...col, cards: densify(next) };
     }
     const without = col.cards.filter(ref => ref.key !== key);
     if (without.length === col.cards.length) return col;

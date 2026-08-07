@@ -160,15 +160,18 @@ function Shell() {
   }, [settingsOpen, refreshPromptConfig]);
 
   // BACI-166 / BACI-332 / BACI-374: composer success handler — optimistically
-  // prepend the new card, then route. With auto-run on (the composer default)
-  // the server already armed the card in one call, so there is nothing to do
-  // but route to the Pipeline, where its progress renders — from any view,
-  // because that is genuinely where the card now lives. With auto-run off we
-  // keep the pre-existing behaviour verbatim: from the Pipeline screen,
-  // auto-scope it (pipe + Scope job on Auto via the scope-shelve chain) and
-  // route to the Pipeline; off the Pipeline, route into the new card's
-  // workspace. On a mid-chain failure of that older sequence the steps before
-  // it already persisted and the refresh leaves a coherent partial state.
+  // prepend the new card, then route. With auto-run on the server already
+  // armed the card in one call, so there is nothing to do but route to the
+  // Pipeline, where its progress renders — from any view, because that is
+  // genuinely where the card now lives. A space with agent surfaces off has
+  // no Pipeline tab and SurfaceGate would bounce that route straight back to
+  // the space home, so there the card's own workspace is the destination.
+  // With auto-run off we keep the pre-existing behaviour verbatim: from the
+  // Pipeline screen, auto-scope it (pipe + Scope job on Auto via the
+  // scope-shelve chain) and route to the Pipeline; off the Pipeline, route
+  // into the new card's workspace. On a mid-chain failure of that older
+  // sequence the steps before it already persisted and the refresh leaves a
+  // coherent partial state.
   const onComposerCreated = useCallback(async (newCard: BoardCard, autoRan: boolean) => {
     if (!newCard || !newCard.key) return;
     setCards(cs => [{ ...newCard }, ...cs]);
@@ -176,7 +179,9 @@ function Shell() {
     setSettingsInitialSection(null);
     if (autoRan) {
       refreshCards({ silent: true });
-      navigate(viewPath(activeBoard, 'pipeline'));
+      navigate(showAgentSurfaces
+        ? viewPath(activeBoard, 'pipeline')
+        : issuePath(activeBoard, newCard.key));
       return;
     }
     if (activeView === 'pipeline') {
@@ -193,7 +198,7 @@ function Shell() {
       return;
     }
     navigate(issuePath(activeBoard, newCard.key));
-  }, [navigate, activeBoard, activeView, refreshCards, setCards]);
+  }, [navigate, activeBoard, activeView, showAgentSurfaces, refreshCards, setCards]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -468,10 +473,17 @@ function Shell() {
           />
         </ErrorBoundary>
         {/* BACI-166: + from prompt composer. Sibling of CommandPalette /
-            ErrorModal so it overlays whatever view is current. */}
+            ErrorModal so it overlays whatever view is current.
+
+            Auto-run defaults to off in a space with agent surfaces hidden.
+            The switch hands the card to the Scope → Plan → Implement → Ship
+            chain and routes it into the Pipeline, and a space that shows no
+            Pipeline tab has not asked for either — the same reason the
+            Kanban lane composer forces it off. */}
         <ErrorBoundary headline="Something went wrong in the issue composer" label="The issue composer crashed">
           <IssueComposer
             open={composerOpen}
+            autoRunDefault={showAgentSurfaces}
             onClose={() => setComposerOpen(false)}
             onCreated={onComposerCreated}
           />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { ChevronLeft, Lock } from 'lucide-react';
@@ -107,9 +107,16 @@ export default function EditEpicPage() {
   const { refreshCards } = useCards();
   const repoSelected = !!activeBoard && activeBoard !== 'all';
 
+  // `silent: true` keeps a failed load out of the global modal — a modal
+  // over a form the user may be mid-edit in is what the design forbids —
+  // so the failure is rendered inline instead, with a retry. Without that
+  // branch a transient network error is indistinguishable from a deleted
+  // epic.
   const {
     data: detail,
     loading,
+    error,
+    refresh,
     setData: setDetail,
   } = useAsyncResource<FeatureDetail | null>(
     () => api.getFeature(activeBoard, slug),
@@ -123,10 +130,15 @@ export default function EditEpicPage() {
   // `detail` change: a property write returns a fresh FeatureDetail, and
   // clobbering the user's half-typed title with it would be the worst
   // possible consequence of flipping a toggle.
+  //
+  // useLayoutEffect, not useEffect: `setData` and `setLoading(false)` land
+  // in the same commit, so a passive effect would leave one commit with a
+  // loaded epic, no draft and loading already false — which is the shape
+  // the "gone" branch below reads as a deleted epic.
   const [draft, setDraft] = useState<EditableDetails | null>(null);
   const [baseline, setBaseline] = useState<EditableDetails | null>(null);
   const seededFor = useRef<string>('');
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!detail) return;
     const identity = `${activeBoard}/${detail.slug}`;
     if (seededFor.current === identity) return;
@@ -280,10 +292,31 @@ export default function EditEpicPage() {
     );
   }
   if (!detail || !draft) {
+    // `detail` present with no draft yet is the seeding gap, not a missing
+    // epic — the layout effect above closes it, and this keeps the "gone"
+    // copy off screen even if it ever reopens.
+    const stillLoading = loading || !!detail;
     return (
       <div className="mk-pe">
         <div className="mk-pe-empty">
-          {loading ? 'Loading…' : (
+          {stillLoading ? 'Loading…' : error ? (
+            <>
+              <p>Couldn’t load this epic.</p>
+              <p className="mk-settings-hint">{errorMessage(error)}</p>
+              <div className="mk-modal-actions">
+                <button
+                  type="button"
+                  className="mk-btn-secondary"
+                  onClick={() => navigate(viewPath(activeBoard, 'features'))}
+                >
+                  Back to Epics
+                </button>
+                <button type="button" className="mk-btn-primary" onClick={() => refresh()}>
+                  Try again
+                </button>
+              </div>
+            </>
+          ) : (
             <>
               <p>That epic doesn’t exist any more.</p>
               <button
@@ -311,10 +344,14 @@ export default function EditEpicPage() {
       className="mk-pe"
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
         // Escape goes THROUGH the guard, never around it.
-        if (e.key === 'Escape' && !saving && !pendingExit) {
-          e.preventDefault();
-          leave();
-        }
+        if (e.key !== 'Escape' || saving || pendingExit) return;
+        // The emoji picker portals its menu out of this subtree, but React
+        // still bubbles the event through the tree — so the Escape that
+        // dismissed the picker would otherwise pop the Discard modal. Only
+        // a keystroke that landed inside the page is ours.
+        if (!(e.target instanceof Node) || !e.currentTarget.contains(e.target)) return;
+        e.preventDefault();
+        leave();
       }}
     >
       <header className="mk-pe-head">

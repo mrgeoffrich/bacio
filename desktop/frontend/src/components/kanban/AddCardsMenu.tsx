@@ -43,6 +43,22 @@ const MAX_ROWS = 50;
 // untouched.
 const CREATE_ROW = -1;
 
+// NO_ROW is "the highlight is nowhere" — the state an emptied result list
+// leaves behind. It has to be distinct from CREATE_ROW so that ⏎ on a
+// search with no matches, or straight after the last candidate was
+// placed, does nothing instead of opening the composer.
+const NO_ROW = -2;
+
+// Radix focuses a MenuItem on pointermove and, on pointerleave, restores
+// focus to the menu content — either of which takes the caret out of the
+// search input, and the typeahead guard only covers keys the input
+// receives. Preventing the default on both keeps focus where the combobox
+// model puts it; the hover highlight is ours (onMouseMove) either way.
+const keepCaretInSearch = {
+  onPointerMove: (e: React.PointerEvent) => e.preventDefault(),
+  onPointerLeave: (e: React.PointerEvent) => e.preventDefault(),
+};
+
 type AddCardsMenuProps = {
   laneName: string;
   // Every card in the repo that no lane holds, already derived by the
@@ -106,7 +122,10 @@ type AddCardsMenuBodyProps = {
 
 function AddCardsMenuBody({ laneName, candidates, onAdd, onCreate, onDone }: AddCardsMenuBodyProps) {
   const [query, setQuery] = useState('');
-  const [active, setActive] = useState(0);
+  // A panel that opens with nothing to place starts on the create row: it
+  // is the only actionable thing in it. Radix unmounts this body on close,
+  // so the seed is re-evaluated on every open.
+  const [active, setActive] = useState(candidates.length === 0 ? CREATE_ROW : 0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -119,11 +138,13 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onCreate, onDone }: Add
   //
   // CREATE_ROW (-1) is the pinned create row's slot in the same highlight
   // space as the result rows, which is what lets ↑ from the first result
-  // park on it and ⏎ fire it. With no candidates at all it is the only
-  // actionable thing in the panel, so the highlight rests there.
+  // park on it and ⏎ fire it. A list that EMPTIES under the highlight —
+  // a search with no matches, or the last candidate being placed — falls
+  // to NO_ROW rather than to create: landing on create there would turn
+  // the next ⏎ of a multi-add run into an unasked-for composer.
   const activeIndex =
     active <= CREATE_ROW ? CREATE_ROW
-      : visible.length === 0 ? CREATE_ROW
+      : visible.length === 0 ? NO_ROW
         : Math.min(active, visible.length - 1);
 
   // Focus the search input on mount. This is also what keeps Radix's
@@ -177,7 +198,9 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onCreate, onDone }: Add
     // separating "make a new card here" from "place an existing one".
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (visible.length === 0) return;
+      // With nothing to place, both arrows park on create — it is the only
+      // row left, and this is how a keyboard user reaches it deliberately.
+      if (visible.length === 0) { highlight(CREATE_ROW); return; }
       if (activeIndex === CREATE_ROW) highlight(0);
       else if (activeIndex === visible.length - 1) highlight(CREATE_ROW);
       else highlight(activeIndex + 1);
@@ -185,7 +208,7 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onCreate, onDone }: Add
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      if (visible.length === 0) return;
+      if (visible.length === 0) { highlight(CREATE_ROW); return; }
       if (activeIndex === CREATE_ROW) highlight(visible.length - 1);
       else if (activeIndex === 0) highlight(CREATE_ROW);
       else highlight(activeIndex - 1);
@@ -197,6 +220,7 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onCreate, onDone }: Add
         create();
         return;
       }
+      // NO_ROW indexes nothing, so this is the no-op the empty list wants.
       const choice = visible[activeIndex];
       if (choice) add(choice.key);
     }
@@ -220,6 +244,9 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onCreate, onDone }: Add
         className={`mk-card-action-item mk-create-menu-new${activeIndex === CREATE_ROW ? ' is-active' : ''}`}
         onSelect={create}
         onMouseMove={() => setActive(CREATE_ROW)}
+        // Pinned ABOVE the search box, so the pointer travelling from the
+        // lane `+` down to the input crosses it every time.
+        {...keepCaretInSearch}
       >
         <Plus size={13} strokeWidth={2} aria-hidden="true" />
         <span>New issue in “{laneName}”…</span>
@@ -260,6 +287,7 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onCreate, onDone }: Add
               // that is the whole point of a multi-add picker.
               onSelect={(e) => { e.preventDefault(); add(card.key); }}
               onMouseMove={() => setActive(i)}
+              {...keepCaretInSearch}
             >
               <span className="mk-mono mk-palette-id">{card.key}</span>
               <span className="mk-palette-title">{card.title}</span>
@@ -273,7 +301,7 @@ function AddCardsMenuBody({ laneName, candidates, onAdd, onCreate, onDone }: Add
             Showing {visible.length} of {matches.length} — keep typing to narrow
           </div>
         )}
-        <DropdownMenu.Item className="mk-card-action-item" onSelect={onDone}>
+        <DropdownMenu.Item className="mk-card-action-item" onSelect={onDone} {...keepCaretInSearch}>
           Done
         </DropdownMenu.Item>
       </div>

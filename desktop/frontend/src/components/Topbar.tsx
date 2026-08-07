@@ -217,7 +217,7 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync, o
             type="button"
             className={`mk-sync-btn is-${syncBadge.variant}`}
             aria-label={syncBadge.label}
-            onClick={onOpenSync}
+            onClick={() => requestNavigation(onOpenSync)}
           >
             <Icon name="refresh" />
           </button>
@@ -239,7 +239,16 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync, o
           </Tooltip>
         )}
         <RepoPicker />
-        <button className="mk-icbtn" aria-label="Settings" onClick={onOpenSettings}><Icon name="settings" /></button>
+        {/* Settings and Sync both swap <Routes> out for SettingsView, which
+            unmounts whatever page is showing — so they go through the guard
+            like the nav tabs beside them, not around it. */}
+        <button
+          className="mk-icbtn"
+          aria-label="Settings"
+          onClick={() => requestNavigation(onOpenSettings)}
+        >
+          <Icon name="settings" />
+        </button>
       </div>
     </header>
   );

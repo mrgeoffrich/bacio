@@ -9,6 +9,7 @@ import {
   errorMessage,
   isReservedSlug,
   isSlugCollisionError,
+  previewSlug,
   slugTaken,
 } from '../epicForm';
 
@@ -69,6 +70,24 @@ describe('deriveSlug mirrors store.Slugify', () => {
 
   it('leaves digits and existing hyphens alone', () => {
     expect(deriveSlug('baci-410 follow-up')).toBe('baci-410-follow-up');
+  });
+});
+
+describe('previewSlug', () => {
+  it('never reaches the EMPTY_SLUG fallback for a field the user emptied', () => {
+    // deriveSlug faithfully mirrors Go and answers `feature` here. A form
+    // field is a different question: blank means "no slug", and submitting
+    // `feature` would create an epic at an address nobody typed.
+    expect(previewSlug('')).toBe('');
+    expect(previewSlug('   ')).toBe('');
+  });
+
+  it('otherwise agrees with deriveSlug exactly', () => {
+    expect(previewSlug('Unified Create Affordance')).toBe('unified-create-affordance');
+    expect(previewSlug('My Epic')).toBe(deriveSlug('My Epic'));
+    // Input that reduces to nothing but was not blank keeps Go's fallback:
+    // the server would derive `feature` from it too.
+    expect(previewSlug('!!!')).toBe(EMPTY_SLUG);
   });
 });
 

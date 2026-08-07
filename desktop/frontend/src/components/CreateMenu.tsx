@@ -34,8 +34,8 @@ import { newEpicPath, viewPath } from '../lib/routes';
 // why.
 
 type ScopedCreateButtonProps = {
-  // Both `title` and `aria-label` get this — the Docs rail head already
-  // sets both on its pair and the re-skin must not regress that.
+  // The accessible name, and the native `title` when there is no Radix
+  // tooltip to carry the hover copy.
   label: string;
   onClick: () => void;
   // Omit for no tooltip; `Tooltip` is a no-op when the label is empty, so
@@ -55,7 +55,9 @@ export function ScopedCreateButton({ label, onClick, tooltip, disabled }: Scoped
         type="button"
         className="mk-create-btn"
         aria-label={label}
-        title={label}
+        // Radix does not suppress a `title` you set yourself, so setting
+        // both shows the styled bubble and the browser's own beside it.
+        title={tooltip ? undefined : label}
         disabled={disabled}
         onClick={onClick}
       >
@@ -137,7 +139,13 @@ export default function CreateMenu({ onNewIssue }: CreateMenuProps) {
           {/* Ordered by frequency, not by nav order. Issues are created
               constantly, epics occasionally; pages sit in between but
               already have four other entries, so they go last. */}
-          <DropdownMenu.Item className="mk-card-action-item" onSelect={onNewIssue}>
+          {/* Through `requestNavigation` like its two siblings: the
+              composer routes on create, and a mounted route holding
+              unsaved work must get its confirm before that happens. */}
+          <DropdownMenu.Item
+            className="mk-card-action-item"
+            onSelect={() => requestNavigation(onNewIssue)}
+          >
             <Columns3 size={13} strokeWidth={2} aria-hidden="true" />
             <span>New issue</span>
             <span className="mk-create-menu-kbd">⌘N</span>

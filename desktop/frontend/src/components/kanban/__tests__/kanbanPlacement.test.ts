@@ -45,6 +45,22 @@ describe('placeCardInLane', () => {
     expect(next[1].cards.map(r => r.position)).toEqual([0, 1]);
   });
 
+  it('inserts at an explicit index so the paint matches the persisted position', () => {
+    // "New issue in this lane" persists position 0; appending optimistically
+    // would paint the card at the bottom and then animate it to the top when
+    // the server board lands.
+    const next = placeCardInLane(board, 'A-9', 'u2', 0);
+    expect(next[1].cards.map(r => r.key)).toEqual(['A-9', 'A-3']);
+    expect(next[1].cards.map(r => r.position)).toEqual([0, 1]);
+  });
+
+  it('clamps an out-of-range index rather than leaving a hole', () => {
+    const next = placeCardInLane(board, 'A-9', 'u1', 99);
+    expect(next[0].cards.map(r => r.key)).toEqual(['A-1', 'A-2', 'A-9']);
+    expect(placeCardInLane(board, 'A-9', 'u1', -3)[0].cards.map(r => r.key))
+      .toEqual(['A-9', 'A-1', 'A-2']);
+  });
+
   it('opts a card that is on no lane onto the board', () => {
     const next = placeCardInLane(board, 'A-9', 'u1');
     expect(next[0].cards.map(r => r.key)).toEqual(['A-1', 'A-2', 'A-9']);

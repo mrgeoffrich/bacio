@@ -155,6 +155,34 @@ describe('EditEpicPage — properties apply immediately', () => {
   });
 });
 
+describe('EditEpicPage — a failed load', () => {
+  it('offers a retry instead of claiming the epic is gone', async () => {
+    // `silent: true` keeps a modal off a form the user may be mid-edit in,
+    // which used to leave a network blip indistinguishable from a delete.
+    getFeature.mockReset().mockRejectedValue(new Error('network down'));
+    mount();
+
+    expect(await screen.findByText(/Couldn’t load this epic/)).toBeTruthy();
+    expect(screen.getByText('network down')).toBeTruthy();
+    expect(screen.queryByText(/doesn’t exist any more/)).toBeNull();
+
+    getFeature.mockResolvedValue(detail());
+    fireEvent.click(screen.getByRole('button', { name: /try again/i }));
+    expect(await screen.findByDisplayValue('Kanban rework')).toBeTruthy();
+  });
+
+  it('still says the epic is gone when the server says so', async () => {
+    getFeature.mockReset().mockResolvedValue(null);
+    mount();
+    expect(await screen.findByText(/doesn’t exist any more/)).toBeTruthy();
+  });
+
+  it('never flashes the gone copy between the load and the draft seeding', async () => {
+    await mounted();
+    expect(screen.queryByText(/doesn’t exist any more/)).toBeNull();
+  });
+});
+
 describe('EditEpicPage — navigation guard', () => {
   it('lets a navigation through untouched when the page is clean', async () => {
     await mounted();
@@ -201,6 +229,28 @@ describe('EditEpicPage — navigation guard', () => {
     await mounted();
     fireEvent.change(titleInput(), { target: { value: 'Kanban overhaul' } });
     fireEvent.click(screen.getByRole('button', { name: /discard edits/i }));
+    expect(await screen.findByText(/Discard your changes/i)).toBeTruthy();
+  });
+
+  it('does NOT interpose the confirm when Escape only dismissed the emoji picker', async () => {
+    // The picker portals its menu out of this page, but React still bubbles
+    // the keystroke through the tree — so the page has to tell an Escape
+    // aimed at the picker from one aimed at itself.
+    await mounted();
+    fireEvent.change(titleInput(), { target: { value: 'Kanban overhaul' } });
+
+    fireEvent.keyDown(screen.getByRole('button', { name: /Epic emoji/ }), { key: 'Enter' });
+    const menu = await screen.findByRole('menu');
+    fireEvent.keyDown(menu, { key: 'Escape', code: 'Escape' });
+
+    expect(screen.queryByText(/Discard your changes/i)).toBeNull();
+    expect(titleInput().value).toBe('Kanban overhaul');
+  });
+
+  it('interposes the confirm on an Escape aimed at the form itself', async () => {
+    await mounted();
+    fireEvent.change(titleInput(), { target: { value: 'Kanban overhaul' } });
+    fireEvent.keyDown(titleInput(), { key: 'Escape' });
     expect(await screen.findByText(/Discard your changes/i)).toBeTruthy();
   });
 
