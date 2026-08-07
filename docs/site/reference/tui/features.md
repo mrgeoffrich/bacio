@@ -1,11 +1,15 @@
 ---
-title: TUI — Features tab
-description: Group issues into features and read the feature overview — description, child issues, linked documents.
+title: TUI — Epics tab
+description: Group issues into epics and read the epic overview — description, child issues, linked documents.
 ---
 
-# Features tab
+# Epics tab
 
-The Features tab (`2`) is a scrollable list of every feature in the current repo. Open one to see its description, its child issues with their states, and any linked documents.
+The Epics tab (`2`) is a scrollable list of every epic in the current repo. Open one to see its description, its child issues with their states, and any linked documents.
+
+::: tip Naming
+"Epic" is the display term. The CLI verbs (`bacio feature ...`), the API routes, the JSON fields and the on-disk sync layout all still say `feature` — the rename was deliberately display-only so existing sync repos and agent prompts keep working.
+:::
 
 ## Bindings (default view)
 
@@ -35,13 +39,13 @@ The overlay shows:
 - **Description** rendered with glamour.
 - **Issues** — every issue with this `feature_slug`, with its canonical key, state, and title.
 
-::: tip Linked documents on features
-Documents that are linked to a feature show up in `bacio feature show -o json` and on linked issues' `bacio issue brief` output (under `documents[].linked_via`). They are deliberately **not** rendered inside the Features overlay — open one of the feature's issues on the [Board tab](/reference/tui/board) (or use [`bacio feature show`](/reference/cli/feature)) to see them.
+::: tip Linked documents on epics
+Documents that are linked to an epic show up in `bacio feature show -o json` and on linked issues' `bacio issue brief` output (under `documents[].linked_via`). They are deliberately **not** rendered inside the Epics overlay — open one of the epic's issues on the [Board tab](/reference/tui/board) (or use [`bacio feature show`](/reference/cli/feature)) to see them.
 :::
 
 ## When to use it
 
-The Features tab is the orientation surface — *"what shipping units do we have, and how big are they?"* For the actual day-to-day of moving cards between states, the [Board tab](/reference/tui/board) is the right view.
+The Epics tab is the orientation surface — *"what shipping units do we have, and how big are they?"* For the actual day-to-day of moving cards between states, the [Board tab](/reference/tui/board) is the right view.
 
 ## Source of truth
 

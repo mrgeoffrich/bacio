@@ -85,7 +85,7 @@ const rawSidebar = [
     text: 'TUI reference',
     items: [
       { text: 'Board tab', link: '/reference/tui/board' },
-      { text: 'Features tab', link: '/reference/tui/features' },
+      { text: 'Epics tab', link: '/reference/tui/features' },
       { text: 'Docs tab', link: '/reference/tui/docs' },
       { text: 'History tab', link: '/reference/tui/history' },
       { text: 'Keybindings', link: '/reference/tui/keybindings' },

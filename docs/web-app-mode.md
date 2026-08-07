@@ -412,19 +412,28 @@ truth for the active repo** — `App` derives the active repo from
     surface, keyed on issue `state`). The nav *label* reads "Agentic
     Pipeline"; the view id stays `'pipeline'`, which is load-bearing in
     `routes.ts`, `App.tsx`, `RepoProvider` and the `is-pipeline` class.
-    The entry is **hidden for a workspace** — no working tree means nowhere
-    for a dispatched worker to run — and `homeView()` lands a workspace on
-    the Kanban instead.
+    The entry is gated on the space's **Agent Mode** setting
+    (`repo_settings.show_agent_surfaces`), which defaults on for a git repo
+    and off for a manual workspace — no working tree means nowhere for a
+    dispatched worker to run. See "Per-space nav surfaces" below.
   - `/:prefix/issues` → the **Kanban** board (`KanbanBoard`), the human-lane
     axis keyed on `issues.kanban_column_id`. The nav view id is `board` and
     `viewPath('board')` has always mapped to `/issues` (matching the tab
     label); the route is what was vestigial. Orthogonal to the Pipeline: a
     card renders here **iff** it belongs to a lane, which is what stops the
-    same card appearing on both pages by accident.
+    same card appearing on both pages by accident. Gated on the space's
+    **Show Kanban Board** setting (`repo_settings.show_kanban`), which
+    defaults *on* for a manual workspace and *off* for a git repo.
   - `/:prefix/issues/:key` → `IssueWorkspace` for that key. react-router
     ranks it above the Kanban list route above it.
-  - `/:prefix/features`, `/:prefix/features/:slug` → `FeaturesView`
-    with the slug pre-selected when present.
+  - `/:prefix/epics`, `/:prefix/epics/:slug` → `FeaturesView` with the
+    slug pre-selected when present. The nav *label* and the URL read
+    "Epics"; the view id stays `'features'`, as do the CLI verbs, the API
+    routes, the JSON fields, the sync folder layout and the `mk-features-*`
+    classes. `/:prefix/features` and `/:prefix/features/:slug` are still
+    mounted, on a `LegacyFeaturesRedirect` that rewrites the page segment
+    in place (preserving slug, query and hash) so pre-rename links keep
+    working.
   - `/:prefix/documents`, `/:prefix/documents/:slug` → `DocsView` with
     the filename pre-selected. The `:slug` segment carries a
     `documentPath`-encoded filename, so dots / unusual characters
@@ -465,7 +474,9 @@ truth for the active repo** — `App` derives the active repo from
     valid prefix* falls back to that repo's Pipeline.
 - **Repo switch re-routes.** Picking a repo from the topbar `RepoPicker`
   (or the `RepoNotFound` board list) swaps the prefix segment and keeps
-  the current page — `/BACI/features` → pick MINI → `/MINI/features`. On
+  the current page — `/BACI/epics` → pick MINI → `/MINI/epics` — unless
+  the target space doesn't expose that tab, in which case it lands on
+  that space's home view. On
   a detail route the trailing entity segment is dropped because the path
   builder emits the list/page root only (`/BACI/issues/BACI-100` → pick
   MINI → `/MINI/pipeline`). `localStorage['bacio-active-repo']` is still
@@ -515,15 +526,17 @@ truth for the active repo** — `App` derives the active repo from
   repo) stays in `localStorage`. These are per-user preferences, not
   addressable state, and don't belong on a shareable URL. The URL
   carries only the path.
-- **Topbar derives the active view from `useLocation`.** The
-  segmented `Agentic Pipeline / Kanban / Features / Documents / Agents /
-  History / Monitor` buttons highlight the matching segment via
-  `viewFromPath`, which skips the leading prefix segment before classifying
-  (`/BACI/issues/...` → `board`, `/BACI/features/...` → `features`, ...).
-  `navForKind(kind)` is what the Topbar actually renders — it drops the
-  Pipeline entry for a workspace. It is exported and consumed by `App` too,
-  because the digit hotkeys map onto the list **by position**; filtering in
-  only one place would silently desync the keyboard from the buttons.
+- **Topbar derives the active view from `useLocation`.** The segmented
+  `Kanban / Epics / Documents / History │ Agentic Pipeline / Agents /
+  Monitor` buttons highlight the matching segment via `viewFromPath`, which
+  skips the leading prefix segment before classifying (`/BACI/issues/...` →
+  `board`, `/BACI/epics/...` → `features`, ...).
+  `navFor(surfaces)` (`lib/nav.ts`) is what the Topbar actually renders. It
+  is exported and consumed by `App` too, because the digit hotkeys map onto
+  the **filtered** list by position; filtering in only one place would
+  silently desync the keyboard from the buttons. A hairline
+  (`.mk-segmented-sep`) is drawn between consecutive entries whose group
+  differs, so it appears only when both groups are non-empty.
   The breadcrumb pill that surfaces while the workspace route is mounted
   reads the key off the path directly (`/<prefix>/issues/:key`), then
   calls `navigate(-1)` on click — the browser back stack handles the
@@ -547,6 +560,63 @@ The workspace's other surfaces (description editor, comment composer,
 PR attach form, dispatch button) all run through the same `api.*`
 calls in both modes; the seam aliases swap `api.ts` for `api.http.ts`
 and the workspace doesn't know the difference.
+
+---
+
+## 7b. Per-space nav surfaces
+
+Which top-nav tabs a space exposes is a **per-space setting**, not a
+function of `repos.kind`. Two boolean gates, both on `repo_settings`:
+
+| Setting | UI label | Gates | Default (git) | Default (workspace) |
+|---|---|---|---|---|
+| `show_agent_surfaces` | Agent Mode | Agentic Pipeline, Agents, Monitor | on | off |
+| `show_kanban` | Show Kanban Board | Kanban | off | on |
+
+Epics, Documents and History are never gated, so the nav is never empty.
+
+**The columns are nullable and the defaults are resolved in Go**, in
+`model.ResolveRepoSurfaces` — the single reader every layer goes
+through. Two reasons a `DEFAULT` can't do this job: `repo_settings` rows
+are created lazily by whichever setting is written first (so `NULL` is
+the common state, and `GetRepoSettings` maps `ErrNoRows` to a zero
+struct), and the intended default depends on `repos.kind`, which
+`repo_settings` cannot see. Never read `show_agent_surfaces` /
+`show_kanban` raw — `RepoSettings` exposes them as
+`ShowAgentSurfacesSet` / `ShowKanbanSet` (`*bool`) precisely so a caller
+can't mistake the raw nullable for the effective value.
+
+**The resolved pair rides every repo payload** — `api.RepoOut` on the
+HTTP side, `Board` on the Wails side — rather than having its own GET.
+`RepoProvider.pickBoard` computes the *target* space's home view
+synchronously inside a click handler, so a separate fetch would put an
+await mid-click. Writes go through `PUT /repos/{prefix}/show-agent-surfaces`
+and `PUT /repos/{prefix}/show-kanban`, which is why those are PUT-only.
+
+**No CLI verb, no `bacio schema` entry.** Nothing in Go branches on
+these — they gate React buttons and one route redirect — which is the
+`pipeline.backlog_collapsed` case, not the `auto_ship` case. See
+`docs/agent-cli-principles.md`.
+
+**`repo_settings` is unsynced**, so these are per-machine. Adding them
+to `repo.yaml` instead would have tripped the A0 rule
+(`internal/sync/paths.go`).
+
+**Frontend consumption** lives in `lib/nav.ts`: `navFor(surfaces)`
+filters `NAV`, and `homeView(surfaces)` picks the landing view from an
+explicit precedence list (`pipeline` → `board` → `features`) rather than
+"first surviving entry" — the visual order puts the work group first,
+but a git repo must still land on the Pipeline, and decoupling the two
+means the groups can be reordered without moving everyone's home.
+
+**Hiding a tab also guards its route.** `App`'s `<SurfaceGate>` wraps
+each gated page and redirects a deep-link to a switched-off surface back
+to the space's home. It is applied **per route**, not as one effect
+above `<Routes>`: the active view is derived from the path, and
+`viewFromPath('/BACI/issues/BACI-1')` is `'board'`, so a path-agnostic
+guard would evict the *issue workspace* whenever Show Kanban was off.
+`/:prefix/issues/:key` is deliberately ungated — it is reached from the
+Pipeline, Epics, the command palette and notifications.
 
 ---
 
