@@ -711,6 +711,26 @@ export function SetIssueState(repoPrefix: string, key: string, state: string): $
     });
 }
 
+/**
+ * SetShowAgentSurfaces persists the per-space "Agent Mode" gate — which
+ * controls whether the Agentic Pipeline, Agents and Monitor tabs are in
+ * the top nav for this space.
+ * 
+ * There is no Get twin: the resolved value already rides every Board
+ * from ListBoards, and the Settings toggle patches the provider's board
+ * list optimistically rather than re-reading.
+ */
+export function SetShowAgentSurfaces(repoPrefix: string, enabled: boolean): $CancellablePromise<boolean> {
+    return $Call.ByID(3830888055, repoPrefix, enabled);
+}
+
+/**
+ * SetShowKanban persists the per-space "Show Kanban Board" gate.
+ */
+export function SetShowKanban(repoPrefix: string, enabled: boolean): $CancellablePromise<boolean> {
+    return $Call.ByID(4195956613, repoPrefix, enabled);
+}
+
 export function ShipCard(repoPrefix: string, key: string): $CancellablePromise<$models.BoardCard> {
     return $Call.ByID(3461643849, repoPrefix, key).then(($result: any) => {
         return $$createType1($result);

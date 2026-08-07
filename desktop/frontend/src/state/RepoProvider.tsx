@@ -56,6 +56,10 @@ export type ActiveRepoContextValue = {
   pickBoard: (prefix: string) => void;
   addRepository: (payload?: AddRepositoryPayload) => Promise<Board | undefined>;
   refreshBoards: () => void;
+  // patchBoard merges a partial update into one board in place — the
+  // optimistic-write path for per-space settings, so the nav reflects a
+  // toggle in the same tick without a refetch.
+  patchBoard: (prefix: string, patch: Partial<Board>) => void;
   // Navigation helpers. openCard / openIssue route to a workspace; closeIssue
   // navigates back; openProcessEditor routes to the Edit Process screen.
   openIssue: (key: string) => void;
@@ -214,6 +218,18 @@ export function RepoProvider({ children }: { children: ReactNode }) {
       .catch(err => reportError(err, { headline: "Couldn't load boards" }));
   }, []);
 
+  // patchBoard merges a partial update into one board in place. The
+  // Settings per-space toggles use it to flip a nav-surface gate
+  // optimistically (and to roll back on a failed write) so the topbar
+  // updates in the same tick as the switch.
+  //
+  // refreshBoards would also work, but in web mode listBoards is N+1 —
+  // an issue-list fetch per repo (see api/board.http.ts) — which is far
+  // too much traffic for flipping a display preference.
+  const patchBoard = useCallback((prefix: string, patch: Partial<Board>) => {
+    setBoards(bs => bs.map(b => (b.prefix === prefix ? { ...b, ...patch } : b)));
+  }, []);
+
   // Add a repository. Desktop pops a native folder picker (Wails); web mode
   // hands the path-input modal's submission through as a payload (BACI-50).
   // On success, refresh the board list and jump to the new repo; an empty
@@ -250,6 +266,7 @@ export function RepoProvider({ children }: { children: ReactNode }) {
       pickBoard,
       addRepository,
       refreshBoards,
+      patchBoard,
       openIssue,
       openCard,
       openProcessEditor,
@@ -268,6 +285,7 @@ export function RepoProvider({ children }: { children: ReactNode }) {
       pickBoard,
       addRepository,
       refreshBoards,
+      patchBoard,
       openIssue,
       openCard,
       openProcessEditor,

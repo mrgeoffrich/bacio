@@ -270,6 +270,36 @@ export async function setBoardHiddenStates(
   }
 }
 
+// setShowAgentSurfaces / setShowKanban persist the per-space
+// nav-surface gates — which top-nav tabs the space exposes. Both return
+// the persisted value.
+//
+// There is deliberately no getter pair: the resolved values already ride
+// every Board from listBoards, so a second read path could drift from
+// the one the nav actually renders off. Callers patch the provider's
+// board list optimistically instead (RepoProvider.patchBoard).
+export async function setShowAgentSurfaces(
+  repoPrefix: string,
+  enabled: boolean,
+): Promise<boolean> {
+  try {
+    return await BoardService.SetShowAgentSurfaces(repoPrefix, enabled);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function setShowKanban(
+  repoPrefix: string,
+  enabled: boolean,
+): Promise<boolean> {
+  try {
+    return await BoardService.SetShowKanban(repoPrefix, enabled);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // getLeaderStatus returns the current UI leader-election state synchronously.
 // Used on mount to seed the UI before the first "leaderStatus" event arrives.
 export async function getLeaderStatus(): Promise<LeaderStatusDTO> {

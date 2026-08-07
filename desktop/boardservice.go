@@ -60,7 +60,20 @@ type Board struct {
 	// nowhere to work) and to group the repository picker by kind.
 	// Legacy rows with an empty kind normalise to "git" here, so the
 	// field is never blank on the wire.
-	Kind                  string     `json:"kind"`
+	Kind string `json:"kind"`
+	// The per-space nav-surface gates — which top-nav tabs this space
+	// exposes. ShowAgentSurfaces is the "Agent Mode" setting (the
+	// Agentic Pipeline / Agents / Monitor group); ShowKanban is "Show
+	// Kanban Board". Both are RESOLVED values: a space that has never
+	// been configured gets the default for its kind (agents on + Kanban
+	// off for a git repo, the reverse for a workspace), never the Go
+	// zero value. See model.ResolveRepoSurfaces.
+	//
+	// They ride the Board rather than getting their own call because
+	// RepoProvider.pickBoard needs the target space's gates
+	// synchronously, inside a click handler, to pick its home view.
+	ShowAgentSurfaces     bool       `json:"showAgentSurfaces"`
+	ShowKanban            bool       `json:"showKanban"`
 	IssueCount            int        `json:"issueCount"`
 	SyncEnabled           bool       `json:"syncEnabled"`
 	SyncBackgroundEnabled bool       `json:"syncBackgroundEnabled"`
@@ -423,21 +436,52 @@ func (b *BoardService) ListBoards() ([]Board, error) {
 			syncByPrefix[st.Prefix] = st
 		}
 	}
+	// Per-space nav-surface gates, keyed by prefix. Unlike sync status
+	// above, a failure here is NOT shrugged off into zero values: the
+	// zero value hides every tab, so a missing entry falls back to the
+	// kind default in surfaceFor rather than blanking the nav.
+	surfaceByPrefix, serr := b.client.RepoSurfaces(ctx)
+	if serr != nil {
+		surfaceByPrefix = nil
+	}
 	boards := make([]Board, 0, len(repos))
 	for _, r := range repos {
 		issues, err := b.client.ListIssues(ctx, client.IssueFilter{Repo: r})
 		if err != nil {
 			return nil, err
 		}
-		boards = append(boards, boardWithSync(r, len(issues), syncByPrefix[r.Prefix]))
+		boards = append(boards, boardWithSync(r, len(issues), syncByPrefix[r.Prefix], surfaceFor(surfaceByPrefix, r)))
 	}
 	return boards, nil
 }
 
-// boardWithSync builds a Board from a repo, issue count, and the
-// repo's sync status. Centralises the SyncEnabled / Sync* mapping so
-// ListBoards and AddRepository stay in lockstep.
-func boardWithSync(r *model.Repo, issueCount int, st client.SyncStatus) Board {
+// surfaceFor pulls one repo's resolved gates out of the bulk map,
+// falling back to the kind default when the map is missing or doesn't
+// carry the prefix. Never returns the zero value, which would read as
+// "hide every tab".
+func surfaceFor(byPrefix map[string]model.RepoSurfaces, r *model.Repo) model.RepoSurfaces {
+	if s, ok := byPrefix[r.Prefix]; ok {
+		return s
+	}
+	return model.ResolveRepoSurfaces(r.Kind, nil, nil)
+}
+
+// oneSurface resolves a single repo's gates for the add-repo /
+// add-workspace paths, which build one Board and don't already hold the
+// bulk map. Same never-zero-value guarantee as surfaceFor.
+func (b *BoardService) oneSurface(ctx context.Context, r *model.Repo) model.RepoSurfaces {
+	byPrefix, err := b.client.RepoSurfaces(ctx)
+	if err != nil {
+		return model.ResolveRepoSurfaces(r.Kind, nil, nil)
+	}
+	return surfaceFor(byPrefix, r)
+}
+
+// boardWithSync builds a Board from a repo, issue count, the repo's
+// sync status and its resolved nav-surface gates. Centralises the
+// SyncEnabled / Sync* / Show* mapping so ListBoards, AddRepository and
+// AddWorkspace stay in lockstep.
+func boardWithSync(r *model.Repo, issueCount int, st client.SyncStatus, surfaces model.RepoSurfaces) Board {
 	// A repo row written before the kind column existed scans as "git"
 	// at the store boundary, but a *model.Repo constructed in Go can
 	// still carry the zero value — normalise so the frontend's
@@ -450,6 +494,8 @@ func boardWithSync(r *model.Repo, issueCount int, st client.SyncStatus) Board {
 		Prefix:                r.Prefix,
 		Name:                  r.Name,
 		Kind:                  kind,
+		ShowAgentSurfaces:     surfaces.ShowAgentSurfaces,
+		ShowKanban:            surfaces.ShowKanban,
 		IssueCount:            issueCount,
 		SyncEnabled:           st.Configured,
 		SyncBackgroundEnabled: st.BackgroundEnabled,
@@ -525,7 +571,7 @@ func (b *BoardService) AddRepository() (Board, error) {
 			}
 		}
 	}
-	return boardWithSync(repo, len(issues), st), nil
+	return boardWithSync(repo, len(issues), st, b.oneSurface(ctx, repo)), nil
 }
 
 // AddWorkspace registers a manual workspace — a repo row with
@@ -565,7 +611,7 @@ func (b *BoardService) AddWorkspace(name, prefix string) (Board, error) {
 			}
 		}
 	}
-	return boardWithSync(repo, len(issues), st), nil
+	return boardWithSync(repo, len(issues), st, b.oneSurface(ctx, repo)), nil
 }
 
 // ListColumns returns the kanban columns — the legacy state-board
@@ -1199,6 +1245,32 @@ func (b *BoardService) SetAutoShip(repoPrefix string, enabled bool) (bool, error
 		return false, err
 	}
 	return b.client.SetRepoAutoShip(ctx, repo, enabled, false)
+}
+
+// SetShowAgentSurfaces persists the per-space "Agent Mode" gate — which
+// controls whether the Agentic Pipeline, Agents and Monitor tabs are in
+// the top nav for this space.
+//
+// There is no Get twin: the resolved value already rides every Board
+// from ListBoards, and the Settings toggle patches the provider's board
+// list optimistically rather than re-reading.
+func (b *BoardService) SetShowAgentSurfaces(repoPrefix string, enabled bool) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.SetRepoShowAgentSurfaces(ctx, repo, enabled, false)
+}
+
+// SetShowKanban persists the per-space "Show Kanban Board" gate.
+func (b *BoardService) SetShowKanban(repoPrefix string, enabled bool) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.SetRepoShowKanban(ctx, repo, enabled, false)
 }
 
 // GetAutoShip reads the per-repo Shipping-column auto-ship toggle so the

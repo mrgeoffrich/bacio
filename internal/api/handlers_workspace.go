@@ -69,7 +69,7 @@ func (d deps) createWorkspace(w http.ResponseWriter, r *http.Request, name, pref
 		writeDryRun(w, http.StatusCreated, repo)
 		return
 	}
-	writeJSON(w, http.StatusCreated, repo)
+	writeJSON(w, http.StatusCreated, d.repoOutOne(repo))
 }
 
 // workspaceErrorField attributes a create failure to the field that

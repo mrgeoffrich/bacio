@@ -5,23 +5,37 @@ import {
   reshapeSyncSetup,
   reshapeRepoLinkResult,
 } from '../sync';
+import type { ApiRepo } from '../sync';
 
 // BACI-358: sync-domain reshapers, testable now they live outside
 // api.http.ts. Cover the SyncStatus→Board fold, the registry snake→camel
 // rename, the sync-setup init/clone/collision branches, and the
 // phantom-link fallback to the call arguments.
 
+// repo builds the ApiRepo argument boardWithSync now takes. The two
+// surface gates default to "absent" so each spec opts in to the case it
+// is actually about.
+function repo(prefix: string, name: string, kind: string, extra: Partial<ApiRepo> = {}): ApiRepo {
+  return { prefix, name, kind, path: '', ...extra };
+}
+
 describe('boardWithSync', () => {
   it('folds a present sync status into the Board badge fields', () => {
-    const b = boardWithSync('BACI', 'bacio', 'git', 12, {
-      prefix: 'BACI', configured: true, mirrored_by: 'bacio-sync',
-      background_enabled: true, in_progress: true,
-      last_sync_at: 's', last_error: 'e',
-    });
+    const b = boardWithSync(
+      repo('BACI', 'bacio', 'git', { show_agent_surfaces: true, show_kanban: false }),
+      12,
+      {
+        prefix: 'BACI', configured: true, mirrored_by: 'bacio-sync',
+        background_enabled: true, in_progress: true,
+        last_sync_at: 's', last_error: 'e',
+      },
+    );
     expect(b).toEqual({
       prefix: 'BACI',
       name: 'bacio',
       kind: 'git',
+      showAgentSurfaces: true,
+      showKanban: false,
       issueCount: 12,
       syncEnabled: true,
       syncBackgroundEnabled: true,
@@ -35,7 +49,7 @@ describe('boardWithSync', () => {
   // BACI-376: mirrored-without-own-config is the state the badge used to
   // mislabel — it has to survive the fold intact.
   it('carries mirrored_by for a repo with no sync config of its own', () => {
-    const b = boardWithSync('OPER', 'oper', 'git', 9, {
+    const b = boardWithSync(repo('OPER', 'oper', 'git'), 9, {
       prefix: 'OPER', configured: false, mirrored_by: 'bacio-sync',
       background_enabled: true, in_progress: false,
     });
@@ -47,7 +61,7 @@ describe('boardWithSync', () => {
   // configuration — a configured repo with the ticker switched off
   // must not fold down to "enabled".
   it('keeps the global background toggle distinct from per-repo config', () => {
-    const b = boardWithSync('BACI', 'bacio', 'git', 1, {
+    const b = boardWithSync(repo('BACI', 'bacio', 'git'), 1, {
       prefix: 'BACI', configured: true, background_enabled: false, in_progress: false,
     });
     expect(b.syncEnabled).toBe(true);
@@ -55,7 +69,7 @@ describe('boardWithSync', () => {
   });
 
   it('defaults the badges off when sync status is undefined', () => {
-    const b = boardWithSync('X', 'x', 'git', 0, undefined);
+    const b = boardWithSync(repo('X', 'x', 'git'), 0, undefined);
     expect(b.syncEnabled).toBe(false);
     expect(b.syncBackgroundEnabled).toBe(false);
     expect(b.syncMirroredBy).toBeUndefined();
@@ -67,8 +81,41 @@ describe('boardWithSync', () => {
   // gets narrowed onto the contract's union, so every Board the HTTP
   // transport builds carries a real discriminator.
   it('narrows the wire kind onto the contract union', () => {
-    expect(boardWithSync('WKSP', 'wksp', 'workspace', 0, undefined).kind).toBe('workspace');
-    expect(boardWithSync('LEGA', 'lega', '', 0, undefined).kind).toBe('git');
+    expect(boardWithSync(repo('WKSP', 'wksp', 'workspace'), 0, undefined).kind).toBe('workspace');
+    expect(boardWithSync(repo('LEGA', 'lega', ''), 0, undefined).kind).toBe('git');
+  });
+
+  // The gates arrive already resolved from the server, so an explicit
+  // false means "hidden" and must survive verbatim — including the
+  // all-off combination, which a `?? default` on a falsy value would
+  // quietly turn back on.
+  it('passes the resolved surface gates through untouched', () => {
+    const b = boardWithSync(
+      repo('WKSP', 'wksp', 'workspace', { show_agent_surfaces: true, show_kanban: true }),
+      0, undefined,
+    );
+    expect(b.showAgentSurfaces).toBe(true);
+    expect(b.showKanban).toBe(true);
+
+    const off = boardWithSync(
+      repo('BACI', 'bacio', 'git', { show_agent_surfaces: false, show_kanban: false }),
+      0, undefined,
+    );
+    expect(off.showAgentSurfaces).toBe(false);
+    expect(off.showKanban).toBe(false);
+  });
+
+  // An older bacio api omits the keys entirely. Absent must fall back to
+  // the kind default (mirroring model.ResolveRepoSurfaces), never to
+  // "hide everything".
+  it('falls back to the kind defaults when an older server omits the gates', () => {
+    const git = boardWithSync(repo('BACI', 'bacio', 'git'), 0, undefined);
+    expect(git.showAgentSurfaces).toBe(true);
+    expect(git.showKanban).toBe(false);
+
+    const wksp = boardWithSync(repo('WKSP', 'wksp', 'workspace'), 0, undefined);
+    expect(wksp.showAgentSurfaces).toBe(false);
+    expect(wksp.showKanban).toBe(true);
   });
 });
 
