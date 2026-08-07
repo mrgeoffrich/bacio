@@ -1,7 +1,10 @@
 import { lazy, Suspense, useState } from 'react';
+import { Link } from 'react-router';
+import { Pencil } from 'lucide-react';
 import * as api from '../../api';
 import type { FeatureDetail, FeatureSummary } from '../../api';
 import { reportError } from '../../errors';
+import { editEpicPath } from '../../lib/routes';
 import FeatureEmojiPicker from '../FeatureEmojiPicker';
 import { VIEW_MODE_OPTIONS } from './constants';
 import { shortDate, stateLabelFor } from './format';
@@ -78,6 +81,18 @@ export default function FeatureDetailPane({
         <span className={`mk-pill mk-status-${detail.state || 'active'}`}>
           {stateLabelFor(detail.state)}
         </span>
+        {/* The Edit page is ADDITIVE — nothing on this pane was removed
+            for it. What it adds that has no other home anywhere is the
+            title editor; the rest is a bulk-edit convenience. Same shape
+            as the docs folder page's Rename button. */}
+        <Link
+          to={editEpicPath(activeBoard, detail.slug)}
+          className="mk-btn-secondary mk-features-edit-btn"
+          title="Edit this epic"
+        >
+          <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+          <span>Edit</span>
+        </Link>
       </div>
       <div className="mk-features-meta">
         <span className="mk-mono">{detail.slug}</span>

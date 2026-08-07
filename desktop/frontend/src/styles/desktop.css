@@ -4684,23 +4684,281 @@ ul.mk-docs-tree-children {
   background: var(--bg-2, var(--ink-50));
 }
 
-/* BACI-287: the relocated + (new issue) button in the Pipeline Backlog
-   column header. Sized to match the sibling drawer toggles so the header
-   button rhythm stays uniform; the spacer before it already anchors the
-   group to the right edge, so this button drops the toggles'
-   margin-left:auto to sit flush beside them. */
-.mk-pl-new-issue {
-  width: 26px; height: 26px;
-  border-radius: 6px;
-  border: 1px solid var(--border-1);
-  background: var(--paper);
-  color: var(--fg-3);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-}
-.mk-pl-new-issue:hover { color: var(--fg-1); border-color: var(--border-2); }
-.mk-pl-new-issue .mk-icon { width: 15px; height: 15px; }
+/* BACI-287 put a `+` (new issue) button in the Pipeline Backlog column
+   header; `.mk-pl-new-issue` was its bespoke 26px bordered chiclet, one of
+   five different visual languages the app used to say "create". It is
+   retired in favour of the shared `.mk-create-btn`, so the Backlog `+`,
+   the Kanban lane `+` and the Epics `+` are one control with one skin. */
 /* With the + button present, the first drawer toggle's own
    margin-left:auto would split the group; the spacer handles the push, so
-   keep the right-hand buttons flush. */
-.mk-pl-col-head .mk-pl-new-issue + .mk-pl-drawer-toggle { margin-left: 0; }
+   keep the right-hand buttons flush. The `+` now wears the shared
+   `.mk-create-btn` chrome, so the sibling rule follows it — leaving it
+   pointed at the retired `.mk-pl-new-issue` would make the drawer toggles
+   jump. */
+.mk-pl-col-head .mk-create-btn + .mk-pl-drawer-toggle { margin-left: 0; }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Unified create affordance + the two epic form pages.
+
+   Two families here, both deliberately small:
+
+   1. `.mk-create-*` — the ONE scoped-plus chrome. The rule the design
+      states is "a Plus in the top-right of the container the thing lands
+      in", and a shared class is how that rule is enforced rather than
+      re-argued per surface. `.mk-create-btn` is lifted verbatim from
+      `.mk-col-add-btn` (app.css:203), which it now shares with the
+      Pipeline Backlog `+` and the Epics list head `+`.
+   2. `.mk-epic-*` — the New Epic / Edit Epic forms, which otherwise
+      borrow the `.mk-pe` page shell and the `.mk-features-prop-*` label /
+      hint / error vocabulary wholesale.
+   ───────────────────────────────────────────────────────────────────── */
+
+/* The 22px scoped plus. Same box, radius, resting colour and hover as
+   `.mk-col-add-btn`, including the Radix `[data-state="open"]` hold, so
+   the lane `+`, the Backlog `+` and the Epics `+` are one control wearing
+   one skin. Radix dropdown triggers keep the hover treatment while their
+   popover is up. */
+.mk-create-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  background: transparent; border: 0; padding: 0;
+  border-radius: 4px; color: var(--fg-3); cursor: pointer;
+  flex: none;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-create-btn:hover,
+.mk-create-btn[data-state="open"] {
+  background: var(--bg-4); color: var(--fg-1);
+}
+.mk-create-btn .mk-icon { width: 15px; height: 15px; }
+
+/* The Topbar variant: the only FILLED control in `.mk-topbar-right`, and
+   that is the point — it must read as the action among four utilities.
+   `.mk-btn-primary` metrics (32px, 8px radius, the primary fill) plus room
+   for the label and the caret.
+
+   Disabled uses a real --bg-4 fill rather than `opacity`, because a halved
+   sky-blue drops the label below 4.5:1 on dark, whereas --fg-4 clears it
+   on both themes. */
+.mk-create-btn--lg {
+  width: auto; height: 32px;
+  padding: 0 10px; gap: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--coral-500);
+  background: var(--coral-500);
+  color: var(--fg-on-primary);
+  font-family: var(--font-sans); font-size: 13px; font-weight: 500;
+  white-space: nowrap;
+}
+.mk-create-btn--lg:hover:not(:disabled),
+.mk-create-btn--lg[data-state="open"]:not(:disabled) {
+  background: var(--coral-600); border-color: var(--coral-600);
+  color: var(--fg-on-primary);
+}
+.mk-create-btn--lg:disabled,
+.mk-create-btn--lg[aria-disabled="true"] {
+  background: var(--bg-4); border-color: var(--border-1);
+  color: var(--fg-4); cursor: not-allowed;
+}
+.mk-create-btn--lg .mk-create-btn-label { line-height: 1; }
+
+/* The tinted create row pinned to the TOP of the Kanban lane popover.
+   `.mk-card-action-item` metrics, plus the one tint in the panel — colour
+   is one of the four signals (position / colour / verb / keyboard) that
+   keep "make a new card here" apart from "place an existing card here".
+   The status tints go translucent in dark, which is exactly what this
+   needs to sit on a dark popover. */
+.mk-create-menu-new {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--sky-50);
+  color: var(--sky-700);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+}
+.mk-create-menu-new:hover,
+.mk-create-menu-new.is-active,
+.mk-create-menu-new[data-highlighted] {
+  background: var(--sky-100);
+  color: var(--sky-700);
+}
+.mk-create-menu-new .mk-create-menu-new-hint {
+  margin-left: auto; font-family: var(--font-mono); font-size: 11px; opacity: .7;
+}
+/* The `⌘N` hint on the Topbar menu's New-issue row — the menu ADVERTISES
+   the chord rather than replacing it; ⌘N still opens the composer
+   directly, bypassing the menu entirely. */
+.mk-create-menu-kbd {
+  margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-4);
+}
+.mk-create-menu .mk-card-action-item { display: flex; align-items: center; gap: 8px; }
+
+/* The Epics list-pane head strip — structurally the Docs rail head
+   (`.mk-docs-tree-head`), which is why it reuses that class and only adds
+   the bottom hairline the docs rail gets from its own siblings. */
+.mk-features-head { border-bottom: 1px solid var(--border-1); }
+
+/* The empty-state family: a statement of fact, a one-line explanation, a
+   primary button — copied from DocsFolderPage's empty folder, which is the
+   moment this pattern was got right. */
+.mk-empty-cta {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; text-align: center;
+}
+.mk-empty-cta-title { font-size: 13px; font-weight: 600; color: var(--fg-2); }
+.mk-empty-cta-sub { font-size: 12px; color: var(--fg-4); line-height: 1.4; }
+.mk-empty-cta .mk-btn-primary { margin-top: 6px; }
+
+/* ── The New Epic / Edit Epic forms ── */
+
+.mk-epic-form { display: flex; flex-direction: column; gap: 20px; }
+
+.mk-epic-back {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; border: 0; padding: 0;
+  color: var(--fg-3); cursor: pointer;
+  font-family: var(--font-sans); font-size: 12px; font-weight: 500;
+}
+.mk-epic-back:hover { color: var(--fg-1); }
+
+.mk-epic-field { display: flex; flex-direction: column; gap: 6px; }
+.mk-epic-field-head { display: flex; align-items: baseline; gap: 8px; }
+/* The required / optional marker. It sits beside the label rather than
+   inside it so the label stays a clean `htmlFor` target. */
+.mk-epic-req {
+  font-family: var(--font-sans); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em;
+  color: var(--status-blocked);
+}
+.mk-epic-req.is-optional { color: var(--fg-4); font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 11px; }
+/* Edit / Reset on the slug row, and Discard on the edit foot — a text
+   affordance that is emphatically not a button-shaped thing, because it
+   toggles a mode rather than committing anything. */
+.mk-epic-linkbtn {
+  margin-left: auto;
+  background: transparent; border: 0; padding: 0;
+  color: var(--status-claude); cursor: pointer;
+  font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+}
+.mk-epic-linkbtn:hover:not(:disabled) { text-decoration: underline; }
+.mk-epic-linkbtn:disabled { color: var(--fg-4); cursor: not-allowed; }
+
+.mk-epic-input {
+  width: 100%; min-width: 0;
+  height: 34px; padding: 0 10px;
+  background: var(--bg-1);
+  color: var(--fg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  outline: none;
+  font-family: var(--font-sans); font-size: var(--text-sm);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.mk-epic-input:focus { border-color: var(--status-claude); }
+.mk-epic-input:disabled { opacity: .6; cursor: not-allowed; }
+.mk-epic-input::placeholder { color: var(--fg-4); }
+.mk-epic-input-title { font-size: var(--text-md); font-weight: 600; height: 38px; }
+
+/* Emoji picker + title on one row, mirroring `.mk-features-title-row` on
+   the detail pane — the create form should look like a blank version of
+   the thing it makes. */
+.mk-epic-title-row { display: flex; align-items: center; gap: 10px; }
+.mk-epic-title-row .mk-epic-input { flex: 1; }
+
+/* The slug shown as the tail of the WHOLE path. A bare word would not
+   communicate that this is the epic's identity in the URL, in the CLI and
+   in the sync folder layout. */
+.mk-epic-slug {
+  display: flex; align-items: center; gap: 0;
+  min-height: 34px; padding: 0 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono); font-size: var(--text-sm);
+  overflow: hidden;
+}
+.mk-epic-slug.is-error { border-color: var(--status-blocked); }
+.mk-epic-slug.is-readonly { border-style: dashed; }
+.mk-epic-slug-prefix { color: var(--fg-3); flex: none; }
+.mk-epic-slug-value { color: var(--fg-1); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.mk-epic-slug-empty { color: var(--fg-4); font-weight: 400; }
+.mk-epic-slug-input {
+  flex: 1; height: 32px; padding: 0;
+  background: transparent; border: 0; border-radius: 0;
+  font-family: var(--font-mono); font-weight: 600;
+}
+.mk-epic-slug-input:focus { border: 0; }
+.mk-epic-slug-lock { margin-left: auto; color: var(--fg-4); display: inline-flex; flex: none; }
+
+.mk-epic-textarea {
+  width: 100%; min-width: 0;
+  padding: 8px 10px;
+  background: var(--bg-1);
+  color: var(--fg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  outline: none; resize: vertical;
+  font-family: var(--font-sans); font-size: var(--text-sm); line-height: 1.6;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.mk-epic-textarea:focus { border-color: var(--status-claude); }
+.mk-epic-textarea:disabled { opacity: .6; cursor: not-allowed; }
+.mk-epic-textarea::placeholder { color: var(--fg-4); }
+
+/* ── Edit Epic: the two-speed split ──
+   Four redundant signals carry it — surface colour, a card boundary, an
+   explicit badge, and a Save button that names its own scope. Caption text
+   alone would not survive a skim. */
+.mk-epic-section {
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+}
+/* PROPERTIES sits on --bg-3, which inverts with the theme, so the zone
+   stays sunken RELATIVE TO --paper in both light and dark. */
+.mk-epic-section.is-sunken { background: var(--bg-3); }
+.mk-epic-section-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mk-epic-section-title {
+  font-family: var(--font-sans); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--fg-3);
+}
+.mk-epic-section-note { font-size: 11px; color: var(--fg-4); }
+.mk-epic-section-head .mk-pill { flex: none; }
+/* The 2x2 properties grid. The page is 720px where the detail pane is
+   not, so four full-width rows of a 96px segmented control would be mostly
+   whitespace. */
+.mk-epic-props {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px 24px;
+}
+/* The per-write SAVED flash on a property that just persisted — the
+   receipt that makes "applied immediately" believable. */
+.mk-epic-saved-flash {
+  margin-left: 6px;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em;
+}
+/* The UNSAVED - n chip beside the page title. Worth the pixels: it is the
+   only thing that tells a user who has scrolled that there is something
+   above the fold they have not saved. */
+.mk-epic-dirty-chip { font-size: 10px; letter-spacing: .04em; }
+.mk-epic-edited-marker {
+  margin-left: auto;
+  font-family: var(--font-sans); font-size: 10px; font-weight: 600;
+  color: var(--status-doing); text-transform: lowercase;
+}
+/* The Edit entry point in the detail pane's title row. A Link wearing
+   button chrome, pushed to the right edge so it never crowds the state
+   pill; `text-decoration: none` because .mk-btn-secondary was written for
+   a <button>. */
+.mk-features-edit-btn {
+  margin-left: auto;
+  height: 26px; padding: 0 10px;
+  font-size: 12px;
+  text-decoration: none;
+  flex: none;
+}
+.mk-features-edit-btn:hover { text-decoration: none; }

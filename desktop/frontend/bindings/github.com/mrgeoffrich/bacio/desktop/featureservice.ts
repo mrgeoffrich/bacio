@@ -4,8 +4,9 @@
 /**
  * FeatureService is the Wails-bound feature API the desktop frontend talks to.
  * It wraps a local bacio client.Client and reshapes its results into the DTOs
- * the Features view expects. Read-only: features are created and edited via
- * the CLI. Features are per-repo, so every method needs a concrete repo
+ * the Features view expects. Reads, the per-property setters, and — since the
+ * New Epic / Edit Epic pages landed — CreateFeature plus the batched
+ * UpdateFeature. Features are per-repo, so every method needs a concrete repo
  * prefix (the "all repositories" pseudo-board has no feature scope).
  * @module
  */
@@ -24,6 +25,25 @@ import * as $models from "./models.js";
  */
 export function AddFeatureComment(repoPrefix: string, slug: string, author: string, body: string): $CancellablePromise<$models.FeatureDetail> {
     return $Call.ByID(517388757, repoPrefix, slug, author, body).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
+ * CreateFeature creates one feature and returns its freshly-loaded
+ * FeatureDetail — the Wails twin of `POST /repos/{prefix}/features`,
+ * backing the New Epic page. slug is optional: empty derives it from the
+ * title via store.Slugify, exactly as the HTTP handler and the CLI do, so
+ * the client can mirror the derivation for a live preview and still leave
+ * the server authoritative. description / emoji / branchName are all
+ * optional; each is validated at the store boundary, so a multi-cluster
+ * emoji or a malformed refname surfaces as an error from the client. A
+ * duplicate slug surfaces as the store's UNIQUE-constraint rejection —
+ * the page pre-checks against its loaded list and keeps a fallback for
+ * the two-windows race.
+ */
+export function CreateFeature(repoPrefix: string, title: string, slug: string, description: string, emoji: string, branchName: string): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(2166269279, repoPrefix, title, slug, description, emoji, branchName).then(($result: any) => {
         return $$createType0($result);
     });
 }
@@ -165,6 +185,28 @@ export function SetFeatureState(repoPrefix: string, slug: string, state: string)
  */
 export function SetHiddenOnBoard(repoPrefix: string, slug: string, hidden: boolean): $CancellablePromise<$models.FeatureDetail> {
     return $Call.ByID(1990222744, repoPrefix, slug, hidden).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
+ * UpdateFeature applies the Edit Epic page's Details section in ONE write
+ * — the Wails twin of `PATCH /repos/{prefix}/features/{slug}`, which has
+ * always accepted all four content fields together.
+ * 
+ * The pointers are presence, not value: nil means "no change", a non-nil
+ * pointer to "" means "clear this field" (an empty branchName puts the
+ * column back to NULL and the epic ships to main again). That is exactly
+ * client.UpdateFeature's own contract, so this method is a pass-through
+ * plus the resolve/reshape sandwich every other method here wears.
+ * 
+ * All-nil is a no-op rather than an error: the client would reject it
+ * with "nothing to update", but a Save from a form whose dirty-tracking
+ * just went clean is better answered with the current detail than with a
+ * failure the user cannot act on.
+ */
+export function UpdateFeature(repoPrefix: string, slug: string, title: string | null, description: string | null, emoji: string | null, branchName: string | null): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(871631132, repoPrefix, slug, title, description, emoji, branchName).then(($result: any) => {
         return $$createType0($result);
     });
 }

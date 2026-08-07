@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import type { ReactNode } from 'react';
 import type { FeatureDetail } from '../../api';
 import { useOptimisticToggle } from '../../lib/hooks/useOptimisticToggle';
 
@@ -32,6 +33,11 @@ type FeaturePropertyToggleProps = {
   hint?: string;
   // The longer `title` tooltip on the hint; defaults to `hint` when omitted.
   hintTitle?: string;
+  // Optional trailing badge beside the label — the Edit Epic page's
+  // `SAVED` flash, which is what makes "applied immediately" believable
+  // on a page that also carries a Save button. The detail pane passes
+  // nothing and renders exactly as before.
+  badge?: ReactNode;
 };
 
 export default function FeaturePropertyToggle({
@@ -44,6 +50,7 @@ export default function FeaturePropertyToggle({
   errorHeadline,
   hint,
   hintTitle,
+  badge,
 }: FeaturePropertyToggleProps) {
   const { value: current, setValue, set } = useOptimisticToggle(
     value,
@@ -63,11 +70,18 @@ export default function FeaturePropertyToggle({
 
   return (
     <div className="mk-features-prop">
-      <label className="mk-features-prop-label">{label}</label>
+      <label className="mk-features-prop-label">
+        {label}
+        {badge}
+      </label>
       <div className="mk-segmented" role="group" aria-label={ariaLabel}>
         {options.map((opt) => (
           <button
             key={String(opt.id)}
+            // Explicit type: the Edit Epic page renders these rows on a
+            // page that also carries a <form>, where a bare <button>
+            // would default to submit and fire the batched Details save.
+            type="button"
             className={`mk-segmented-btn ${current === opt.id ? 'is-active' : ''}`}
             aria-pressed={current === opt.id}
             onClick={() => set(opt.id)}

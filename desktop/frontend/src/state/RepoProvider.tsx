@@ -8,6 +8,7 @@ import { readLocalStorage, writeLocalStorage } from '../lib/hooks/useLocalStorag
 import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath, repoPrefixFromKey } from '../lib/routes';
 import { navFor, homeView, DEFAULT_SURFACES } from '../lib/nav';
 import type { NavSurfaces } from '../lib/nav';
+import { requestNavigation } from '../lib/navGuard';
 
 // RepoProvider (BACI-361) owns the repo-selection layer App.tsx used to
 // carry: the boards/columns list, the BACI-285 URL-derived active repo and
@@ -178,12 +179,17 @@ export function RepoProvider({ children }: { children: ReactNode }) {
   // special case: switching from any tab onto a space that doesn't expose
   // it lands on that space's home view, instead of a page with nothing
   // highlighted and no way back.
+  // Both of the shell-wide navigation helpers route through
+  // `requestNavigation`, which is what lets a mounted route holding unsaved
+  // work (the Edit Epic page) confirm first. Guarding the two funnels here
+  // covers the repo picker, the notification bell, the Shipped popover and
+  // the kanban deep-links in one place rather than at each call site.
   const pickBoard = useCallback((prefix: string) => {
     if (!prefix) return;
     const surfaces = surfacesForPrefix(boards, prefix);
     const current = viewFromPath(location.pathname);
     const survives = navFor(surfaces).some(item => item.view === current);
-    navigate(viewPath(prefix, survives ? current : homeView(surfaces)));
+    requestNavigation(() => navigate(viewPath(prefix, survives ? current : homeView(surfaces))));
   }, [navigate, location.pathname, boards]);
 
   // BACI-203: navigate-by-key for prev/next sibling jumps, the kanban
@@ -195,15 +201,17 @@ export function RepoProvider({ children }: { children: ReactNode }) {
   // behaviour), same as useNotifications' already-cross-repo deep-link.
   const openIssue = useCallback((key: string) => {
     if (!key) return;
-    navigate(issuePath(repoPrefixFromKey(key) || activeBoard, key));
+    requestNavigation(() => navigate(issuePath(repoPrefixFromKey(key) || activeBoard, key)));
   }, [navigate, activeBoard]);
 
   // Open a card's workspace by routing to /issues/:key. Settings dismissal
   // (when reached from the command palette over the Settings overlay) is
-  // handled by Shell, which owns the overlay flag.
+  // handled by Shell, which owns the overlay flag. Guarded like its two
+  // siblings above — the command palette opens over any page, including one
+  // holding unsaved work.
   const openCard = useCallback((card: BoardCard) => {
     if (!card?.key) return;
-    navigate(issuePath(activeBoard, card.key));
+    requestNavigation(() => navigate(issuePath(activeBoard, card.key)));
   }, [navigate, activeBoard]);
 
   // BACI-294: open the full-screen Edit Process editor for an in_pipeline

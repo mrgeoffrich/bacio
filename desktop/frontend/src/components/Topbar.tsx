@@ -1,12 +1,14 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import Icon from './Icon';
+import CreateMenu from './CreateMenu';
 import RepoPicker from './RepoPicker';
 import Tooltip from './Tooltip';
 import NotificationBell from './NotificationBell';
 import ShippedPopover from './ShippedPopover';
 import { WEB_MODE } from '../env';
 import { navFor, DEFAULT_SURFACES } from '../lib/nav';
+import { requestNavigation } from '../lib/navGuard';
 import type { NavItem } from '../lib/nav';
 import { viewPath, viewFromPath } from '../lib/routes';
 import { syncBadgeState } from '../lib/syncBadge';
@@ -25,9 +27,13 @@ type TopbarProps = {
   onBeforeNavigate?: () => void;
   onOpenSettings: () => void;
   onOpenSync: () => void;
+  // The global `+ New ▾` menu's "New issue" row. Same shell-owned overlay
+  // flag ⌘N already flips, threaded as a prop for the same reason the two
+  // above are.
+  onOpenComposer: () => void;
 };
 
-export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }: TopbarProps) {
+export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync, onOpenComposer }: TopbarProps) {
   const { boards, activeBoard, openIssue: onOpenIssue } = useActiveRepo();
   const { agentCounts } = useAgents();
   const {
@@ -99,8 +105,13 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
           // repo-not-found / no-repos screen) so we don't navigate
           // to a prefix-less `//<view>` path.
           if (!activeBoard) return;
-          if (onBeforeNavigate) onBeforeNavigate();
-          navigate(viewPath(activeBoard, item.view));
+          // A mounted route holding unsaved work (the Edit Epic page) can
+          // interpose its own confirm here; with nothing armed this is a
+          // straight pass-through.
+          requestNavigation(() => {
+            if (onBeforeNavigate) onBeforeNavigate();
+            navigate(viewPath(activeBoard, item.view));
+          });
         }}
       >
         {item.label}
@@ -179,6 +190,18 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
       </div>
 
       <div className="mk-topbar-right">
+        {/* The global create menu is the FIRST child of the strip:
+            everything else here is a status readout you notice, this is an
+            action you reach for, and reading order should put the reach
+            first.
+
+            BACI-287 moved the old `+` out of the corner and gave the
+            corner to the bell. That is not undone — the bell keeps the
+            corner and the gear keeps the far edge. What lands one slot
+            inboard is a labelled, type-agnostic menu, and it exists
+            because BACI-287 left a manual workspace (no Pipeline tab) with
+            no in-app way to create an issue at all. */}
+        <CreateMenu onNewIssue={onOpenComposer} />
         {/* BACI-287: the notification bell takes the top-right corner the
             `+` (new issue) button used to hold — the `+` moved into the
             Pipeline Backlog column header. The bell is global / cross-repo
@@ -194,7 +217,7 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
             type="button"
             className={`mk-sync-btn is-${syncBadge.variant}`}
             aria-label={syncBadge.label}
-            onClick={onOpenSync}
+            onClick={() => requestNavigation(onOpenSync)}
           >
             <Icon name="refresh" />
           </button>
@@ -216,7 +239,16 @@ export default function Topbar({ onBeforeNavigate, onOpenSettings, onOpenSync }:
           </Tooltip>
         )}
         <RepoPicker />
-        <button className="mk-icbtn" aria-label="Settings" onClick={onOpenSettings}><Icon name="settings" /></button>
+        {/* Settings and Sync both swap <Routes> out for SettingsView, which
+            unmounts whatever page is showing — so they go through the guard
+            like the nav tabs beside them, not around it. */}
+        <button
+          className="mk-icbtn"
+          aria-label="Settings"
+          onClick={() => requestNavigation(onOpenSettings)}
+        >
+          <Icon name="settings" />
+        </button>
       </div>
     </header>
   );

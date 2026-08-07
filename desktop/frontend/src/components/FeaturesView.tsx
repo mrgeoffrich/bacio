@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { Search, X } from 'lucide-react';
 import { reportError } from '../errors';
 import * as api from '../api';
 import type { FeatureSummary } from '../api';
+import { newEpicPath } from '../lib/routes';
 import { useActiveRepo } from '../state/RepoProvider';
 import { useCards } from '../state/CardsProvider';
+import { ScopedCreateButton } from './CreateMenu';
 import { FILTERS } from './features/constants';
 import { useFeatureFiltering } from './features/useFeatureFiltering';
 import { useFeatureSelection } from './features/useFeatureSelection';
@@ -27,8 +30,13 @@ import FeatureDetailPane from './features/FeatureDetailPane';
 // sync, and detail fetch live in components/features/ hooks; the left-rail
 // row and the right-pane detail are components/features/ components.
 export default function FeaturesView() {
-  const { activeBoard } = useActiveRepo();
+  const { activeBoard, boards } = useActiveRepo();
   const { refreshCards: onChangeHidden } = useCards();
+  const navigate = useNavigate();
+  // The empty state names the space kind rather than always saying
+  // "repository" — a manual workspace is not a repo, and this is the copy
+  // a workspace user meets first.
+  const spaceKind = boards.find((b) => b.prefix === activeBoard)?.kind ?? 'git';
   const [features, setFeatures] = useState<FeatureSummary[]>([]);
   // BACI-199 / BACI-242 filter strip: which state bucket the list is
   // restricted to, defaulting to `active` so a fresh visit shows the
@@ -91,6 +99,20 @@ export default function FeaturesView() {
   return (
     <div className="mk-features">
       <aside className="mk-features-list-pane">
+        {/* The list pane used to begin abruptly at the filter chips. This
+            head strip is structurally the Docs rail head — mono-uppercase
+            pane title flush left, the scoped create control flush right —
+            which is what makes "a Plus in the top-right of the container"
+            a rule rather than a coincidence. Epics accept one type, so it
+            is a plain button, not a menu. */}
+        <div className="mk-docs-tree-head mk-features-head">
+          <span className="mk-docs-tree-title">Epics</span>
+          <ScopedCreateButton
+            label="New epic"
+            tooltip="New epic"
+            onClick={() => navigate(newEpicPath(activeBoard))}
+          />
+        </div>
         <div
           className="mk-features-filter"
           role="tablist"
@@ -136,8 +158,26 @@ export default function FeaturesView() {
 
         <div className="mk-features-list">
           {allFeatures.length === 0 ? (
-            <div className="mk-features-list-empty">
-              No epics in this repository.
+            // The discoverability moment. A statement of fact, a one-line
+            // explanation, a primary button — the shape DocsFolderPage's
+            // empty folder got right and every empty state here now copies.
+            // The FILTERED-empty case below deliberately gets no button:
+            // the list is not empty, the filter is just narrow, and
+            // offering "create" there answers the wrong question.
+            <div className="mk-features-list-empty mk-empty-cta">
+              <span className="mk-empty-cta-title">
+                No epics in this {spaceKind === 'workspace' ? 'workspace' : 'repository'} yet.
+              </span>
+              <span className="mk-empty-cta-sub">
+                Epics group issues and set a shared branch.
+              </span>
+              <button
+                type="button"
+                className="mk-btn-primary"
+                onClick={() => navigate(newEpicPath(activeBoard))}
+              >
+                New epic
+              </button>
             </div>
           ) : visible.length === 0 ? (
             <div className="mk-features-list-empty">

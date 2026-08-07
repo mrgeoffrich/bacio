@@ -83,6 +83,7 @@ export type {
   FeaturePlanEntry,
   FeaturePlan,
   FeatureDetail,
+  FeatureUpdateFields,
   HistoryEntryDTO,
   HistoryPage,
   LeaderStatusDTO,

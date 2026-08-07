@@ -22,6 +22,8 @@ const {
   issuePath,
   repoPrefixFromKey,
   featurePath,
+  newEpicPath,
+  editEpicPath,
   documentPath,
   viewFromPath,
   prefixFromPath,
@@ -63,6 +65,24 @@ test('featurePath builds the prefixed epic detail route', () => {
   // The slug is the wire/CLI key and is unchanged; only the page segment
   // follows the Epics rename.
   assert.equal(featurePath('BACI', 'auth-rewrite'), '/BACI/epics/auth-rewrite');
+});
+
+test('newEpicPath / editEpicPath build the two epic form routes', () => {
+  assert.equal(newEpicPath('BACI'), '/BACI/epics/new');
+  assert.equal(editEpicPath('BACI', 'auth-rewrite'), '/BACI/epics/auth-rewrite/edit');
+  assert.equal(editEpicPath('MINI', 'bugs'), '/MINI/epics/bugs/edit');
+});
+
+test('the reserved `new` slug is exactly why the create form refuses it', () => {
+  // featurePath('BACI', 'new') collides with the create route — this is
+  // the collision RESERVED_SLUGS exists to prevent, pinned here so the
+  // reason survives a future refactor of either helper.
+  assert.equal(featurePath('BACI', 'new'), newEpicPath('BACI'));
+});
+
+test('both epic form routes still classify as the Epics nav view', () => {
+  assert.equal(viewFromPath(newEpicPath('BACI')), 'features');
+  assert.equal(viewFromPath(editEpicPath('BACI', 'auth-rewrite')), 'features');
 });
 
 test('documentPath URL-encodes the filename under the prefix', () => {

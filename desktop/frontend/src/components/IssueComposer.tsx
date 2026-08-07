@@ -32,13 +32,26 @@ import { useActiveRepo } from '../state/RepoProvider';
 // BACI-361: the active repo prefix is read from useActiveRepo() rather than
 // prop-drilled (the composer is hidden when "all" is active, but it still
 // defends at the API boundary).
+//
+// autoRunDefault (unified create affordance): what the auto-run switch
+// resets to on each open. It stays true for the Topbar / Backlog entry
+// points — the historical behaviour — and is forced FALSE for the
+// lane-scoped composer on the Kanban. "A card in this lane" is not "run
+// four agents unattended", and auto-run routes the card into the Pipeline
+// (which a manual workspace does not even show).
 type IssueComposerProps = {
   open: boolean;
   onClose: () => void;
   onCreated: (newCard: BoardCard, autoRan: boolean) => void;
+  autoRunDefault?: boolean;
 };
 
-export default function IssueComposer({ open, onClose, onCreated }: IssueComposerProps) {
+export default function IssueComposer({
+  open,
+  onClose,
+  onCreated,
+  autoRunDefault = true,
+}: IssueComposerProps) {
   const { activeBoard: repoPrefix } = useActiveRepo();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -52,9 +65,9 @@ export default function IssueComposer({ open, onClose, onCreated }: IssueCompose
   // with no features / no default stays creatable.
   const [features, setFeatures] = useState<FeatureSummary[]>([]);
   const [featureSlug, setFeatureSlug] = useState('');
-  // BACI-374: auto-run defaults on and resets to on every open — "defaults
-  // to on" is per-issue, not a remembered preference.
-  const [autoRun, setAutoRun] = useState(true);
+  // BACI-374: auto-run resets to its entry point's default on every open —
+  // "defaults to on" is per-issue, not a remembered preference.
+  const [autoRun, setAutoRun] = useState(autoRunDefault);
 
   // Autofocus the description on open — title is optional per the
   // design (the worker derives one from the description when empty),
@@ -65,14 +78,14 @@ export default function IssueComposer({ open, onClose, onCreated }: IssueCompose
       setDescription('');
       setError('');
       setInFlight(false);
-      setAutoRun(true);
+      setAutoRun(autoRunDefault);
       // requestAnimationFrame so the textarea exists in the DOM by the
       // time we reach for it (Radix Dialog mounts on the next tick).
       requestAnimationFrame(() => {
         descriptionRef.current?.focus();
       });
     }
-  }, [open]);
+  }, [open, autoRunDefault]);
 
   // Phase 4: load the repo's features + default when the composer opens
   // so the picker is populated and pre-selected. Both calls are

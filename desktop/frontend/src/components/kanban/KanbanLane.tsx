@@ -52,6 +52,11 @@ type KanbanLaneProps = {
   // lane uuid rather than being pre-bound per lane, so the board hands
   // every lane ONE stable identity each.
   onAddCard: (uuid: string, key: string) => void;
+  // Open the lane-scoped composer. Same shape as the callbacks above —
+  // takes the lane uuid rather than being pre-bound, so the board hands
+  // every lane ONE stable identity each and the memo'd cards below don't
+  // re-render on the 10s poll.
+  onCreateCard: (uuid: string) => void;
   onTakeCardOffBoard: (key: string) => void;
   onRenameLane: (uuid: string) => void;
   onMoveLane: (uuid: string, delta: number) => void;
@@ -80,6 +85,7 @@ export default function KanbanLane({
   onCardDragStart,
   onCardDragEnd,
   onAddCard,
+  onCreateCard,
   onTakeCardOffBoard,
   onRenameLane,
   onMoveLane,
@@ -120,6 +126,7 @@ export default function KanbanLane({
               laneName={column.name}
               candidates={offBoardCards}
               onAdd={(key) => onAddCard(column.uuid, key)}
+              onCreate={() => onCreateCard(column.uuid)}
             />
             <LaneMenu
               laneName={column.name}
@@ -153,8 +160,24 @@ export default function KanbanLane({
             </button>
           </header>
           <div className="mk-col-body">
+            {/* The old copy — "Drag a card here, or add one with +" — was
+                false in both halves on a fresh workspace: there is nothing
+                to drag, and the `+` only PLACED cards that already
+                existed. Now that it creates too, the empty lane gets the
+                folder-page treatment: a statement of fact, a one-line
+                explanation, and a primary button. */}
             {cards.length === 0 && (
-              <div className="mk-col-empty">Drag a card here, or add one with +</div>
+              <div className="mk-col-empty mk-empty-cta">
+                <span className="mk-empty-cta-title">Nothing in this lane yet.</span>
+                <span className="mk-empty-cta-sub">Drag a card in, or start a new one.</span>
+                <button
+                  type="button"
+                  className="mk-btn-primary"
+                  onClick={() => onCreateCard(column.uuid)}
+                >
+                  New issue
+                </button>
+              </div>
             )}
             {/* AnimatePresence so a card leaving the lane (dragged away, or
                 taken off the board by another window's poll) plays its exit

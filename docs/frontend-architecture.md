@@ -191,7 +191,27 @@ local hooks:
   **ref-not-state** `initializedRef` guard (BACI-340).
 - `components/features/*`, `components/settings/*` — the same treatment for the
   Epics and Settings screens. (The directory and the type names stay
-  `feature*`; only the display term and the URL became "Epics".)
+  `feature*`; only the display term and the URL became "Epics".) `features/`
+  also holds the two full-screen epic forms — `NewEpicPage` and `EditEpicPage`
+  — plus the pure `epicForm.ts` (a TS mirror of `store.Slugify`, the reserved
+  `new` slug, and the local collision check) beside them, the same
+  fiddly-bits-in-a-sibling-`.ts` split `kanbanPlacement.ts` and `docsActions.ts`
+  use. `EditEpicPage` is deliberately **two-speed**: Details (title,
+  description, emoji, branch) batch through one `api.updateFeature` PATCH
+  behind `Save details`, while the four properties keep the per-field
+  optimistic setters they use on the detail pane — they render through the
+  *same* `FeaturePropertyToggle` / `FeatureStateControl` components, so the
+  identical control cannot behave differently on the two screens it appears on.
+- `components/CreateMenu.tsx` — the shared create chrome, and the single place
+  the rule lives: *a Plus in the top-right of the container the thing lands in;
+  a menu when the container accepts more than one type, the create flow
+  directly when it accepts one.* It exports the Topbar's multi-type
+  `+ New ▾` menu and the `ScopedCreateButton` every surface header wears
+  (Epics list head, Pipeline Backlog, the Kanban lane trigger's chrome). The
+  global instance is not cosmetic: `navFor()` hides the Pipeline tab when
+  `showAgentSurfaces` is off — the default for a manual workspace — and the
+  Backlog header was the only place a "new issue" button lived, so a workspace
+  previously had no in-app way to create an issue at all.
 - `lib/nav.ts` — the top-nav data (`NAV`) plus `navFor()` / `homeView()`, which
   gate the tabs on the active space's `showAgentSurfaces` / `showKanban`. It
   lives in `lib/`, not in `Topbar.tsx`, because `RepoProvider` and `App` both

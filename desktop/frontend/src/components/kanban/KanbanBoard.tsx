@@ -4,6 +4,7 @@ import { Plus } from 'lucide-react';
 import KanbanLane from './KanbanLane';
 import LaneDeleteDialog from './LaneDeleteDialog';
 import LaneNameDialog from './LaneNameDialog';
+import IssueComposer from '../IssueComposer';
 import { useCollapsedColumns } from './boardCollapsePersistence';
 import { useCompactColumns } from './boardCompactPersistence';
 import { persistKanbanScroll, readKanbanScroll } from './kanbanPersistence';
@@ -70,7 +71,7 @@ function messageOf(err: unknown): string {
 
 export default function KanbanBoard() {
   const { activeBoard, openCard, openIssue } = useActiveRepo();
-  const { cards } = useCards();
+  const { cards, setCards, refreshCards } = useCards();
   const mutate = useOptimisticMutation();
 
   // The lanes. `useAsyncResource` owns the load / stale-guard / error policy;
@@ -172,6 +173,57 @@ export default function KanbanBoard() {
   const onAddCard = useCallback((uuid: string, key: string) => {
     placeCard(key, uuid);
   }, [placeCard]);
+
+  // ─── Create a card INTO a lane ─────────────────────────────────────
+  //
+  // The lane's `+` used only to PLACE cards that already existed, which
+  // meant a manual workspace — where the Pipeline tab (and with it the
+  // only "new issue" button) is hidden by default — had no way to create
+  // an issue at all. This is the other half of that trigger.
+  const [composerLane, setComposerLane] = useState<string | null>(null);
+  const onCreateCard = useCallback((uuid: string) => setComposerLane(uuid), []);
+
+  // "New issue in this lane" means the card lands HERE, at the top.
+  //
+  // On a git repo `kanban_column_id` stays NULL at creation by design
+  // (local_issue.go only auto-places on a workspace), so the card would
+  // otherwise be created off-board and never appear in the lane it was
+  // created from. Hence the chain: create, then place at position 0
+  // through the same optimistic path the drop handler uses, so the card
+  // animates in at the top of the lane. On a workspace the second call is
+  // a cheap re-placement from "first lane" to "this lane, top" — which is
+  // what the user asked for anyway.
+  //
+  // Partial failure is deliberate: if the placement leg fails the issue
+  // still exists, off-board, where this very popover can place it on the
+  // next attempt. We do NOT roll the create back — silently deleting
+  // something the user typed a description into is worse than an unplaced
+  // card.
+  // The composer keeps its auto-run switch here even though the default is
+  // off, so a user who flips it on has handed the card to the engine. The
+  // card still lands in the lane they created it from — that is what they
+  // asked for, and this board is where they are — but the engine has
+  // already moved it on, so the freshly-prepended optimistic card is stale
+  // the moment it is drawn. Re-read rather than wait out the poll.
+  const onComposerCreated = useCallback((newCard: BoardCard, autoRan: boolean) => {
+    const uuid = composerLane;
+    setComposerLane(null);
+    if (!uuid || !newCard?.key) return;
+    setCards(cs => [{ ...newCard }, ...cs]);
+    if (autoRan) refreshCards({ silent: true });
+    const before = columnsRef.current;
+    collapsed.remove(uuid);
+    mutate({
+      // Index 0 in the optimistic snapshot, `position: 0` on the wire —
+      // the card has to paint where the server will put it, or it lands at
+      // the bottom and then animates to the top when the board arrives.
+      optimisticUpdate: () => setColumns(placeCardInLane(before, newCard.key, uuid, 0)),
+      persist: () => api.moveIssueToKanbanColumn(activeBoard, newCard.key, uuid, 0),
+      onSuccess: (board) => setColumns(board),
+      rollback: () => setColumns(before),
+      errorHeadline: "Couldn't place the new issue",
+    });
+  }, [activeBoard, collapsed, composerLane, mutate, refreshCards, setCards, setColumns]);
 
   // The inverse of "+": an empty column uuid is how the seam un-opts a
   // card, putting `kanban_column_id` back to NULL. The issue is untouched
@@ -349,6 +401,7 @@ export default function KanbanBoard() {
             onCardDragStart={onCardDragStart}
             onCardDragEnd={onCardDragEnd}
             onAddCard={onAddCard}
+            onCreateCard={onCreateCard}
             onTakeCardOffBoard={onTakeCardOffBoard}
             onRenameLane={onRenameLane}
             onMoveLane={onMoveLane}
@@ -361,6 +414,20 @@ export default function KanbanBoard() {
         </button>
       </div>
       {hint && <div className="mk-kanban-hint">{hint}</div>}
+
+      {/* The lane-scoped composer. AUTO-RUN IS OFF here, and that is not a
+          detail: the composer's own default hands the card to the engine
+          on the full Scope → Plan → Implement → Ship chain, which routes
+          it into the Pipeline. A user who asked for "a card in this lane"
+          did not ask for four agents. The shell composer defaults it off
+          too on a space with no Pipeline tab; the Backlog `+` only exists
+          where there is one, so it keeps the historical default. */}
+      <IssueComposer
+        open={composerLane !== null}
+        autoRunDefault={false}
+        onClose={() => setComposerLane(null)}
+        onCreated={onComposerCreated}
+      />
 
       {dialog?.kind === 'create' && (
         <LaneNameDialog

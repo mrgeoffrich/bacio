@@ -126,8 +126,9 @@ type FeatureDetail struct {
 
 // FeatureService is the Wails-bound feature API the desktop frontend talks to.
 // It wraps a local bacio client.Client and reshapes its results into the DTOs
-// the Features view expects. Read-only: features are created and edited via
-// the CLI. Features are per-repo, so every method needs a concrete repo
+// the Features view expects. Reads, the per-property setters, and — since the
+// New Epic / Edit Epic pages landed — CreateFeature plus the batched
+// UpdateFeature. Features are per-repo, so every method needs a concrete repo
 // prefix (the "all repositories" pseudo-board has no feature scope).
 type FeatureService struct {
 	client client.Client
@@ -239,6 +240,65 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 		Documents:       docs,
 		HiddenOnBoard:   feat.HiddenOnBoard,
 	}, nil
+}
+
+// CreateFeature creates one feature and returns its freshly-loaded
+// FeatureDetail — the Wails twin of `POST /repos/{prefix}/features`,
+// backing the New Epic page. slug is optional: empty derives it from the
+// title via store.Slugify, exactly as the HTTP handler and the CLI do, so
+// the client can mirror the derivation for a live preview and still leave
+// the server authoritative. description / emoji / branchName are all
+// optional; each is validated at the store boundary, so a multi-cluster
+// emoji or a malformed refname surfaces as an error from the client. A
+// duplicate slug surfaces as the store's UNIQUE-constraint rejection —
+// the page pre-checks against its loaded list and keeps a fallback for
+// the two-windows race.
+func (f *FeatureService) CreateFeature(repoPrefix, title, slug, description, emoji, branchName string) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	created, err := f.client.CreateFeature(ctx, repo, inputs.FeatureAddInput{
+		Title:       title,
+		Slug:        slug,
+		Description: description,
+		Emoji:       emoji,
+		BranchName:  branchName,
+	}, false)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, created.Slug)
+}
+
+// UpdateFeature applies the Edit Epic page's Details section in ONE write
+// — the Wails twin of `PATCH /repos/{prefix}/features/{slug}`, which has
+// always accepted all four content fields together.
+//
+// The pointers are presence, not value: nil means "no change", a non-nil
+// pointer to "" means "clear this field" (an empty branchName puts the
+// column back to NULL and the epic ships to main again). That is exactly
+// client.UpdateFeature's own contract, so this method is a pass-through
+// plus the resolve/reshape sandwich every other method here wears.
+//
+// All-nil is a no-op rather than an error: the client would reject it
+// with "nothing to update", but a Save from a form whose dirty-tracking
+// just went clean is better answered with the current detail than with a
+// failure the user cannot act on.
+func (f *FeatureService) UpdateFeature(repoPrefix, slug string, title, description, emoji, branchName *string) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if title == nil && description == nil && emoji == nil && branchName == nil {
+		return f.GetFeature(repoPrefix, slug)
+	}
+	if _, err := f.client.UpdateFeature(ctx, repo, slug, title, description, emoji, branchName, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
 }
 
 // SetFeatureState (BACI-199) flips the feature's three-state column

@@ -92,8 +92,26 @@ export default function DocsTreeRail({
 
   return (
     <aside className="mk-docs-tree-rail">
+      {/* Re-skin only — this is the surface that already got the rule
+          right. The container accepts TWO types, and "a menu when more
+          than one type" is satisfied here by two adjacent buttons rather
+          than a menu: cheaper, already shipped, and both `title` and
+          `aria-label` survive.
+
+          The one change: the collapse button moves LEFT of the create
+          pair, so the create cluster owns the right edge of the strip and
+          matches every other head in the app. */}
       <div className="mk-docs-tree-head">
         <span className="mk-docs-tree-title">Documents</span>
+        <button
+          type="button"
+          className="mk-icbtn mk-docs-tree-headbtn"
+          onClick={onCollapse}
+          title="Hide sidebar"
+          aria-label="Hide sidebar"
+        >
+          <PanelLeftClose size={14} strokeWidth={2} aria-hidden="true" />
+        </button>
         <button
           type="button"
           className="mk-icbtn mk-docs-tree-headbtn"
@@ -111,15 +129,6 @@ export default function DocsTreeRail({
           aria-label="New page"
         >
           <FilePlus2 size={14} strokeWidth={2} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="mk-icbtn mk-docs-tree-headbtn"
-          onClick={onCollapse}
-          title="Hide sidebar"
-          aria-label="Hide sidebar"
-        >
-          <PanelLeftClose size={14} strokeWidth={2} aria-hidden="true" />
         </button>
       </div>
 

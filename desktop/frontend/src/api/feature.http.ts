@@ -4,7 +4,8 @@
 import { call, readActor } from './client.http';
 import { reshapeFeatureSummary, reshapeFeatureView, reshapePlanView } from './wire/feature';
 import type { ApiFeature, ApiFeatureView, ApiPlanView } from './wire/feature';
-import type { FeatureSummary, FeaturePlan, FeatureDetail } from './contract';
+import type { FeatureSummary, FeaturePlan, FeatureDetail, FeatureUpdateFields } from './contract';
+
 
 export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]> {
   if (!repoPrefix || repoPrefix === 'all') {
@@ -216,6 +217,67 @@ export async function deleteFeatureComment(
   }
   await call<unknown>(`/repos/${repoPrefix}/features/${slug}/comments/${commentUUID}`, {
     method: 'DELETE',
+  });
+  return getFeature(repoPrefix, slug);
+}
+
+// createFeature backs the New Epic page — the HTTP twin of the Wails
+// FeatureService.CreateFeature. `POST /repos/{p}/features` answers with a
+// bare model.Feature rather than a FeatureView, so this re-reads through
+// getFeature to hand back a FeatureDetail, exactly as every other mutator
+// in this file does.
+//
+// The handler decodes with inputio.DecodeStrict, which 400s on an unknown
+// field — so the body carries exactly {title, slug?, description?,
+// emoji?, branch_name?} and the optional keys are omitted when empty
+// rather than sent as "".
+export async function createFeature(
+  repoPrefix: string,
+  title: string,
+  slug: string,
+  description: string,
+  emoji: string,
+  branchName: string,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to create an epic');
+  }
+  const body: Record<string, string> = { title };
+  if (slug) body.slug = slug;
+  if (description) body.description = description;
+  if (emoji) body.emoji = emoji;
+  if (branchName) body.branch_name = branchName;
+  const created = await call<ApiFeature>(`/repos/${encodeURIComponent(repoPrefix)}/features`, {
+    method: 'POST',
+    body,
+  });
+  return getFeature(repoPrefix, created.slug);
+}
+
+// updateFeature is the Edit Epic page's batched Details save — the HTTP
+// twin of FeatureService.UpdateFeature.
+//
+// The presence-map footgun lives here: handleFeatureEdit reads a key that
+// is PRESENT but empty as "clear this field" and an ABSENT key as "no
+// change". So the body is built key by key from what the caller actually
+// supplied — never `{...fields}`, whose `undefined` members only vanish
+// by grace of JSON.stringify.
+export async function updateFeature(
+  repoPrefix: string,
+  slug: string,
+  fields: FeatureUpdateFields,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit an epic');
+  }
+  const body: Record<string, string> = { slug };
+  if (fields.title !== undefined) body.title = fields.title;
+  if (fields.description !== undefined) body.description = fields.description;
+  if (fields.emoji !== undefined) body.emoji = fields.emoji;
+  if (fields.branchName !== undefined) body.branch_name = fields.branchName;
+  await call<ApiFeature>(`/repos/${encodeURIComponent(repoPrefix)}/features/${encodeURIComponent(slug)}`, {
+    method: 'PATCH',
+    body,
   });
   return getFeature(repoPrefix, slug);
 }
