@@ -93,9 +93,11 @@ func (s *Store) CreateRepo(prefix, name, path, remoteURL string) (*model.Repo, e
 // Unlike CreateRepo this DOES bootstrap, because nothing else ever
 // will: a git repo is re-resolved from its cwd on every command and
 // bootstrapped there, but a workspace has no cwd to be found from, so
-// an un-bootstrapped one would open with no Kanban board and no
-// catch-all features, permanently. BootstrapRepoDefaults is idempotent,
-// so a caller that also bootstraps is harmless.
+// an un-bootstrapped one would open with no Kanban board, permanently.
+// BootstrapRepoDefaults is idempotent, so a caller that also bootstraps
+// is harmless. For a workspace the Kanban IS the whole bootstrap — the
+// catch-all epics are a git-repo/Pipeline thing and are deliberately
+// skipped here.
 //
 // The sync importer must NOT use this — it needs to preserve the uuid
 // from repo.yaml and must not mint a new one, and it runs inside a
@@ -126,9 +128,8 @@ func (s *Store) CreateWorkspace(prefix, name string) (*model.Repo, error) {
 	}
 	// A workspace has no cwd to auto-register from, so nothing will
 	// re-resolve it later and bootstrap it the way the git path does on
-	// every `resolveRepoC`. Seed it here or it opens with no Kanban board
-	// and no catch-all features. Idempotent, so a caller that also
-	// bootstraps is harmless.
+	// every `resolveRepoC`. Seed it here or it opens with no Kanban board.
+	// Idempotent, so a caller that also bootstraps is harmless.
 	if err := s.BootstrapRepoDefaults(repo.ID); err != nil {
 		return nil, fmt.Errorf("CreateWorkspace: bootstrap defaults: %w", err)
 	}

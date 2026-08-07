@@ -42,7 +42,7 @@ The prefix is allocated from the name by the same machinery a git registration u
 bacio workspace add "Home Renovation" --prefix HOUS
 ```
 
-Creating a workspace seeds the mandatory catch-all features and the starter Kanban board (`Backlog` / `Doing` / `Waiting` / `Done`), so it takes issues immediately.
+Creating a workspace seeds the starter Kanban board (`Backlog` / `Doing` / `Waiting` / `Done`), so it takes issues immediately. It does **not** seed any epics: the mandatory catch-all epics (Maintenance / Bugs) exist for the Agentic Pipeline, which a workspace hides by default, so a new workspace starts with an empty Epics tab and its issues sit in no epic until you make one with `bacio feature add`.
 
 In the desktop app and in `bacio web`, open the project picker in the top bar and choose **New Workspace…** — the sibling of **Add Git Repository…**. It asks for a name and an optional prefix; there's no folder to pick. The picker groups the list into **Repositories** and **Workspaces**, and once a workspace is selected the closed picker carries a `Workspace` marker, so you always know which kind you're in.
 

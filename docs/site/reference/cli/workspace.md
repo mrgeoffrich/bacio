@@ -27,7 +27,7 @@ workspace HOME (Home Renovation) created — drive it with `bacio --repo HOME <c
 
 The prefix is allocated from the name through the same machinery a git repo registration uses. Workspaces and git repos share one prefix namespace, so collisions de-collide the same way and stay 4 characters: a second `Home …` project becomes `HOM2`, a third `HOM3`. Pin your own with `--prefix HOUS`.
 
-Creating a workspace also seeds the mandatory catch-all features and the starter Kanban board (`Backlog` / `Doing` / `Waiting` / `Done`), so it takes issues immediately.
+Creating a workspace also seeds the starter Kanban board (`Backlog` / `Doing` / `Waiting` / `Done`), so it takes issues immediately. Unlike a git repo it gets **no** catch-all epics — a workspace starts with an empty Epics tab and no default epic, so its issues are epic-less until you add one with `bacio feature add`.
 
 | Flag | What it does |
 |---|---|

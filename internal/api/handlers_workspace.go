@@ -46,8 +46,8 @@ func (d deps) handleWorkspaceCreate(w http.ResponseWriter, r *http.Request) {
 // createWorkspace is the shared body behind POST /workspaces and the
 // `kind == "workspace"` branch of POST /repos. Everything real —
 // validation, prefix allocation, the dry-run projection, the
-// `workspace.create` audit row and BootstrapRepoDefaults (mandatory
-// features + the starter Kanban board) — lives in
+// `workspace.create` audit row and BootstrapRepoDefaults (the starter
+// Kanban board; a workspace gets no catch-all epics) — lives in
 // client.CreateWorkspace; this only shapes the HTTP envelope.
 func (d deps) createWorkspace(w http.ResponseWriter, r *http.Request, name, prefix string) {
 	if strings.TrimSpace(name) == "" {
