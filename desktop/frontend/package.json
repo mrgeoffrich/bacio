@@ -38,7 +38,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
-    "react-router": "^7.15.1",
+    "react-router": "^7.18.2",
     "remark-gfm": "^4.0.1",
     "tiptap-markdown": "^0.9.0"
   },
@@ -55,7 +55,14 @@
     "eslint-plugin-react-refresh": "^0.4.26",
     "jsdom": "^29.1.1",
     "typescript": "^5.2.2",
-    "vite": "^8.0.5",
+    "vite": "^8.0.16",
     "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "brace-expansion": "5.0.9",
+    "js-yaml": "4.3.1",
+    "linkify-it": "5.0.2",
+    "markdown-it": "14.2.0",
+    "undici": "7.29.0"
   }
 }
